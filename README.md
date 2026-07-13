@@ -42,8 +42,8 @@ Rejects:
 
 - direct imports of `iter`;
 - Go 1.23 range-over-function;
-- iterator-shaped project type declarations; and
-- iterator-shaped project function and method declarations.
+- iterator-shaped types in project type, function, and method declarations,
+  including constraints, fields, parameters, and results.
 
 ```go
 import "iter" // rejected
@@ -67,7 +67,7 @@ materialized without naming the iterator type:
 values := slices.Collect(dependency.Values())
 ```
 
-The rule intentionally governs imports, range statements, and type/function
+The rule intentionally governs imports, range statements, and types in project
 declarations. It does not attempt an expression-level ban on every value whose
 type happens to be iterator-shaped.
 

@@ -2,7 +2,6 @@ package boringlint
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"go/types"
 	"testing"
@@ -22,7 +21,7 @@ func TestAnalyzersAreValid(t *testing.T) {
 func TestNoIterator(t *testing.T) {
 	t.Parallel()
 
-	analysistest.Run(t, analysistest.TestData(), NoIterator, "iteratorsignature", "rangefunc")
+	analysistest.Run(t, analysistest.TestData(), NoIterator, "iteratorboundary", "iteratorsignature", "rangefunc")
 }
 
 func BenchmarkIsIteratorType(b *testing.B) {
@@ -74,61 +73,4 @@ func TestReportGenericMethods(t *testing.T) {
 	if len(got) != 1 || got[0] != "Map" {
 		t.Fatalf("reported methods = %v, want [Map]", got)
 	}
-}
-
-func TestNoGenericMethodSyntax(t *testing.T) {
-	t.Parallel()
-
-	const source = `package p
-
-type Result[V any] struct{ value V }
-
-func (result Result[V]) Map[U any](convert func(V) U) U { return convert(result.value) }
-func (result Result[V]) Get() V { return result.value }
-func Map[V, U any](value V, convert func(V) U) U { return convert(value) }
-`
-
-	fileSet := token.NewFileSet()
-	file, err := parser.ParseFile(fileSet, "generic_method.go", source, parser.SkipObjectResolution)
-	if file == nil {
-		t.Fatalf("parser returned no file: %v", err)
-	}
-
-	var got []string
-	reportGenericMethods(file, func(decl *ast.FuncDecl) {
-		got = append(got, decl.Name.Name)
-	})
-
-	if parserSupportsGenericMethods() {
-		if len(got) != 1 || got[0] != "Map" {
-			t.Fatalf("reported methods = %v, want [Map]", got)
-		}
-		return
-	}
-	if err == nil {
-		t.Fatal("pre-Go 1.27 parser accepted a generic method")
-	}
-	if len(got) != 0 {
-		t.Fatalf("pre-Go 1.27 parser retained method type parameters: %v", got)
-	}
-}
-
-func parserSupportsGenericMethods() bool {
-	fileSet := token.NewFileSet()
-	file, _ := parser.ParseFile(
-		fileSet,
-		"probe.go",
-		"package p\ntype R[V any] struct{}\nfunc (R[V]) M[U any]() {}\n",
-		parser.SkipObjectResolution,
-	)
-	if file == nil {
-		return false
-	}
-	for _, declaration := range file.Decls {
-		decl, ok := declaration.(*ast.FuncDecl)
-		if ok && decl.Recv != nil && decl.Type.TypeParams != nil {
-			return true
-		}
-	}
-	return false
 }

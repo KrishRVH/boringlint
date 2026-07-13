@@ -47,7 +47,7 @@ func TestCommand(t *testing.T) {
 func buildCommand(t *testing.T) string {
 	t.Helper()
 
-	binary := filepath.Join(t.TempDir(), "boringlint")
+	binary := filepath.Join(t.TempDir(), "boringlint.exe")
 	command := exec.CommandContext(t.Context(), "go", "build", "-trimpath", "-o", binary, ".") // #nosec G204 -- all arguments are test-controlled.
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build boringlint: %v\n%s", err, output)

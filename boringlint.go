@@ -10,13 +10,13 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// NoIterator rejects direct iter imports, iterator-shaped type and function
-// declarations, and range-over-function.
+// NoIterator rejects direct iter imports, iterator-shaped types in project type,
+// function, and method declarations, and range-over-function.
 var NoIterator = &analysis.Analyzer{
 	Name: "noiterator",
-	Doc: "reject range-over-function and iterator declarations\n\n" +
+	Doc: "reject range-over-function and iterator-shaped types in declarations\n\n" +
 		"noiterator rejects direct iter imports, range-over-function, and " +
-		"iterator-shaped type and function declarations",
+		"iterator-shaped types in project type, function, and method declarations",
 	URL: "https://github.com/KrishRVH/boringlint#noiterator",
 	Run: runNoIterator,
 }
@@ -55,7 +55,7 @@ func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 		return false
 	case *ast.RangeStmt:
 		typ := pass.TypesInfo.TypeOf(node.X)
-		if !isIteratorType(typ) {
+		if !isRangeFunctionType(typ) {
 			return true
 		}
 
@@ -142,6 +142,27 @@ func isYieldSignature(signature *types.Signature) bool {
 		types.Identical(signature.Results().At(0).Type(), types.Typ[types.Bool])
 }
 
+// go/types validates the signature before the analyzer runs; this only
+// distinguishes function ranges from the other legal range operands.
+func isRangeFunctionType(typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+
+	typ = types.Unalias(typ)
+	if _, ok := typ.Underlying().(*types.Signature); ok {
+		return true
+	}
+
+	typeParam, ok := typ.(*types.TypeParam)
+	return ok && hasAssignableSignature(
+		typeParam.Constraint(),
+		typeParam,
+		func(*types.Signature) bool { return true },
+		make(map[types.Type]bool),
+	)
+}
+
 // An iterator-shaped type parameter has a common underlying signature. Find a
 // candidate in the constraint, then let go/types prove that every possible type
 // is assignable to it.
@@ -184,7 +205,7 @@ func hasAssignableSignature(
 	return false
 }
 
-// NoGenericMethod rejects generic method declarations and selections.
+// NoGenericMethod rejects generic method declarations and uses.
 var NoGenericMethod = &analysis.Analyzer{
 	Name: "nogenericmethod",
 	Doc: "reject generic method declarations and uses\n\n" +
@@ -226,16 +247,6 @@ func runNoGenericMethod(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-func hasMethodTypeParameters(object types.Object) bool {
-	method, ok := object.(*types.Func)
-	if !ok {
-		return false
-	}
-	signature, ok := method.Type().(*types.Signature)
-	return ok && signature.Recv() != nil &&
-		signature.TypeParams() != nil && signature.TypeParams().Len() > 0
-}
-
 // reportGenericMethods calls report for each method declaration with its own
 // type parameter list. It remains directly testable on toolchains where that
 // syntax is still rejected before an analysis driver can run.
@@ -249,4 +260,14 @@ func reportGenericMethods(file *ast.File, report func(*ast.FuncDecl)) {
 			report(decl)
 		}
 	}
+}
+
+func hasMethodTypeParameters(object types.Object) bool {
+	method, ok := object.(*types.Func)
+	if !ok {
+		return false
+	}
+	signature, ok := method.Type().(*types.Signature)
+	return ok && signature.Recv() != nil &&
+		signature.TypeParams() != nil && signature.TypeParams().Len() > 0
 }
