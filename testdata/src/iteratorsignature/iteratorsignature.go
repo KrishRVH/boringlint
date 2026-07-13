@@ -22,6 +22,8 @@ type YieldFunc[T any] interface {
 	~func(T) bool
 }
 
+type ConstrainedSequence[T ~func(func(int) bool)] struct{} // want `iterator-shaped type`
+
 type Holder struct {
 	Values Sequence // want `iterator-shaped type`
 }
@@ -61,6 +63,16 @@ type NamedBoolSequence func(func(int) NamedBool)
 type VariadicSequence func(func(...int) bool)
 
 type MixedVariadicSequence func(func(int, ...string) bool)
+
+type NoParamSequence func()
+
+type TwoParamSequence func(func(int) bool, int)
+
+type ThreeValueSequence func(func(int, string, bool) bool)
+
+type NoResultYieldSequence func(func(int))
+
+type TwoResultYieldSequence func(func(int) (bool, error))
 
 var IteratorValue = func(yield func(int) bool) {
 	_ = yield

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -11,22 +12,87 @@ func TestCommand(t *testing.T) {
 	t.Parallel()
 
 	binary := buildCommand(t)
-	root := filepath.Join("..", "..")
+	testCommandModes(
+		t,
+		binary,
+		filepath.Join("..", ".."),
+		".",
+		"./testdata/integration",
+	)
+}
+
+func TestCommandTargetGoVersions(t *testing.T) {
+	t.Parallel()
+
+	binary := buildCommand(t)
+	for _, version := range []string{"1.23.0", "1.24.0"} {
+		t.Run("go"+version, func(t *testing.T) {
+			directory := t.TempDir()
+			writeTestFile(
+				t,
+				filepath.Join(directory, "go.mod"),
+				"module example.com/target\n\ngo "+version+"\n",
+			)
+			writeTestFile(t, filepath.Join(directory, "clean", "clean.go"), `package clean
+
+func values() []int {
+	return []int{1, 2, 3}
+}
+
+func use() {
+	for range values() {
+	}
+}
+`)
+			writeTestFile(t, filepath.Join(directory, "diagnostic", "diagnostic.go"), `package diagnostic
+
+import "iter"
+
+func values(yield func(int) bool) {
+	yield(1)
+}
+
+func sequence() iter.Seq[int] {
+	return values
+}
+
+func use() {
+	for range sequence() {
+	}
+}
+`)
+
+			testCommandModes(t, binary, directory, "./clean", "./diagnostic")
+		})
+	}
+}
+
+func testCommandModes(
+	t *testing.T,
+	binary string,
+	directory string,
+	cleanTarget string,
+	diagnosticTarget string,
+) {
+	t.Helper()
 
 	tests := []struct {
-		name       string
-		executable string
-		arguments  []string
+		name                string
+		executable          string
+		diagnosticArguments []string
+		cleanArguments      []string
 	}{
 		{
-			name:       "standalone",
-			executable: binary,
-			arguments:  []string{"./testdata/integration"},
+			name:                "standalone",
+			executable:          binary,
+			diagnosticArguments: []string{diagnosticTarget},
+			cleanArguments:      []string{cleanTarget},
 		},
 		{
-			name:       "vettool",
-			executable: "go",
-			arguments:  []string{"vet", "-vettool=" + binary, "./testdata/integration"},
+			name:                "vettool",
+			executable:          "go",
+			diagnosticArguments: []string{"vet", "-vettool=" + binary, diagnosticTarget},
+			cleanArguments:      []string{"vet", "-vettool=" + binary, cleanTarget},
 		},
 	}
 
@@ -34,12 +100,13 @@ func TestCommand(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			assertDiagnostics(
 				t,
-				root,
+				directory,
 				test.executable,
-				test.arguments,
+				test.diagnosticArguments,
 				"import of iter is forbidden",
 				"range over a function value",
 			)
+			assertSuccess(t, directory, test.executable, test.cleanArguments)
 		})
 	}
 }
@@ -74,5 +141,26 @@ func assertDiagnostics(
 		if !bytes.Contains(output, []byte(diagnostic)) {
 			t.Errorf("output does not contain %q:\n%s", diagnostic, output)
 		}
+	}
+}
+
+func assertSuccess(t *testing.T, directory string, executable string, arguments []string) {
+	t.Helper()
+
+	command := exec.CommandContext(t.Context(), executable, arguments...) // #nosec G204 -- all arguments are test-controlled.
+	command.Dir = directory
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("command failed: %v\n%s", err, output)
+	}
+}
+
+func writeTestFile(t *testing.T, path string, contents string) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

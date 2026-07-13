@@ -26,13 +26,43 @@ go vet -vettool="$(command -v boringlint)" ./...
 Run both commands. `-vettool` selects `boringlint` in place of the standard vet
 analyzers; it does not add checks to the standard set.
 
-The module requires Go 1.25 or newer. `nogenericmethod` analyzes Go 1.27 syntax,
-so its binary must be built with Go 1.27 or newer. Until Go 1.27 is stable, use
-the current release candidate when testing that rule:
+## Go version support
+
+`boringlint`'s source-project floor is Go 1.23, which introduced
+[range-over-function and `iter`](https://go.dev/doc/go1.23). New Go releases
+are supported only after both command modes pass the compatibility gate; the
+current upper bound is Go 1.27, tested with the Go 1.27rc2 toolchain. Building,
+installing, or running `boringlint` requires Go 1.25 or newer. Importing its
+analyzers into a custom driver has the same floor because a module's
+[`go` directive is a mandatory minimum](https://go.dev/ref/mod#go-mod-file-go).
+A standalone or vettool binary may analyze projects declaring Go 1.23 or 1.24,
+provided the binary was built with a supported toolchain at least as new as the
+source it analyzes.
+
+`nogenericmethod` analyzes Go 1.27 syntax, so its binary must be built with Go
+1.27 or newer. The repository currently tests that rule with Go 1.27rc2:
 
 ```sh
 GOTOOLCHAIN=go1.27rc2 go install github.com/KrishRVH/boringlint/cmd/boringlint@latest
 ```
+
+The Go 1.25 tool floor is deliberate. Analysis drivers consume
+[compiler export data](https://github.com/golang/tools/blob/v0.48.0/go/gcexportdata/gcexportdata.go#L5-L23)
+and implement the [`go vet -vettool` protocol](https://github.com/golang/tools/blob/v0.48.0/go/analysis/unitchecker/unitchecker.go#L82-L96),
+so ordinary Go source compatibility does not make an old driver
+forward-compatible. [`x/tools` v0.36.0](https://github.com/golang/tools/blob/v0.36.0/go.mod)
+was the last release with a Go 1.23 floor before
+[v0.37.0 raised it](https://github.com/golang/tools/blob/v0.37.0/go.mod), but Go
+[subrepositories generally support only the previous two Go releases and tip](https://go.dev/wiki/X-Repositories).
+Freezing the driver there would trade a lower build floor for unsupported
+compiler integration. The compatible
+[`x/tools` v0.48.0](https://github.com/golang/tools/blob/v0.48.0/go.mod) requires
+Go 1.25.
+
+The floor will rise only when correct support for a newly supported Go release
+requires a newer analysis driver. Each increase must be explicit in `go.mod`
+and this section, and both standalone and vettool compatibility must pass
+before support for that source version is claimed.
 
 ## Rules
 

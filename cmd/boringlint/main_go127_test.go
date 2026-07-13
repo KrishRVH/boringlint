@@ -3,7 +3,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -13,7 +12,7 @@ func TestCommandRejectsGenericMethods(t *testing.T) {
 
 	directory := t.TempDir()
 	writeTestFile(t, filepath.Join(directory, "go.mod"), "module example.com/genericmethod\n\ngo 1.27\n")
-	writeTestFile(t, filepath.Join(directory, "genericmethod.go"), `package genericmethod
+	writeTestFile(t, filepath.Join(directory, "dependency", "genericmethod.go"), `package dependency
 
 type Box[T any] struct{}
 
@@ -21,9 +20,21 @@ func (Box[T]) Map[U any](convert func(T) U) U {
 	var value T
 	return convert(value)
 }
+`)
+	writeTestFile(t, filepath.Join(directory, "project", "genericmethod.go"), `package project
 
-func use(box Box[int]) {
+import "example.com/genericmethod/dependency"
+
+type Box[T any] struct{}
+
+func (Box[T]) LocalMap[U any](convert func(T) U) U {
+	var value T
+	return convert(value)
+}
+
+func use(box dependency.Box[int], local Box[int]) {
 	_ = box.Map(func(int) string { return "" })
+	_ = local.LocalMap(func(int) string { return "" })
 }
 `)
 
@@ -32,24 +43,18 @@ func use(box Box[int]) {
 		t,
 		directory,
 		binary,
-		[]string{"."},
+		[]string{"./project"},
 		"declares method-local type parameters",
 		"use of generic method Map",
+		"use of generic method LocalMap",
 	)
 	assertDiagnostics(
 		t,
 		directory,
 		"go",
-		[]string{"vet", "-vettool=" + binary, "."},
+		[]string{"vet", "-vettool=" + binary, "./project"},
 		"declares method-local type parameters",
 		"use of generic method Map",
+		"use of generic method LocalMap",
 	)
-}
-
-func writeTestFile(t *testing.T, path string, contents string) {
-	t.Helper()
-
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		t.Fatal(err)
-	}
 }

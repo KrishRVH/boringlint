@@ -17,14 +17,9 @@ func TestNoGenericMethod(t *testing.T) {
 	t.Parallel()
 
 	testdata, cleanup, err := analysistest.WriteFiles(map[string]string{
-		"dependency/dependency.go": `package dependency
+		"dependency/a_plain.go": `package dependency
 
 type Box[T any] struct{}
-
-func (Box[T]) Map[U any](convert func(T) U) U { // want "generic method Map"
-	var value T
-	return convert(value)
-}
 
 func (Box[T]) Value() T {
 	var value T
@@ -37,7 +32,23 @@ func Map[T, U any](value T, convert func(T) U) U {
 
 type Wrapper[T any] struct{ Box[T] }
 `,
-		"project/project.go": `package project
+		"dependency/b_generic.go": `package dependency
+
+func (Box[T]) Map[U any](convert func(T) U) U { // want "generic method Map"
+	var value T
+	return convert(value)
+}
+`,
+		"project/a_plain.go": `package project
+
+import "dependency"
+
+func useAllowed(box dependency.Box[int]) {
+	_ = box.Value()
+	_ = dependency.Map(1, func(int) string { return "" })
+}
+`,
+		"project/b_generic.go": `package project
 
 import "dependency"
 
@@ -50,8 +61,6 @@ func use(box dependency.Box[int]) {
 	_ = methodExpression
 	var wrapper dependency.Wrapper[int]
 	_ = wrapper.Map[string] // want "use of generic method Map"
-	_ = box.Value()
-	_ = dependency.Map(1, func(int) string { return "" })
 }
 `,
 	})
