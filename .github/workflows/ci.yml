@@ -24,5 +24,8 @@ jobs:
           persist-credentials: false
       - name: Install tools
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3.6.3
+        with:
+          version: "2026.7.5"
+          sha256: 5f7ab76afdf0780d12edeaa67e908094e9ccf7924cfe203e415c1cfb87bbf778
       - name: Run release gate
         run: mise run standards:check
