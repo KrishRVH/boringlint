@@ -3,8 +3,11 @@
 package boringlint
 
 import (
+	"bytes"
 	"go/token"
 	"go/types"
+	"os"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/analysis/analysistest"
@@ -57,7 +60,39 @@ func use(box dependency.Box[int]) {
 	}
 	t.Cleanup(cleanup)
 
-	analysistest.Run(t, testdata, NoGenericMethod, "dependency", "project")
+	results := analysistest.Run(t, testdata, NoGenericMethod, "dependency", "project")
+	assertDiagnosticStartsAt(t, results, "declares method-local type parameters", "Map")
+}
+
+func assertDiagnosticStartsAt(
+	t *testing.T,
+	results []*analysistest.Result,
+	message string,
+	want string,
+) {
+	t.Helper()
+
+	matches := 0
+	for _, result := range results {
+		for _, diagnostic := range result.Diagnostics {
+			if !strings.Contains(diagnostic.Message, message) {
+				continue
+			}
+			position := result.Pass.Fset.Position(diagnostic.Pos)
+			contents, err := os.ReadFile(position.Filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if position.Offset >= len(contents) ||
+				!bytes.HasPrefix(contents[position.Offset:], []byte(want)) {
+				t.Errorf("diagnostic position = %s, want start of %q", position, want)
+			}
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Errorf("matched diagnostics = %d, want 1", matches)
+	}
 }
 
 func TestHasMethodTypeParameters(t *testing.T) {

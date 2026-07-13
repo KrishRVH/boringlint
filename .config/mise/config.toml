@@ -28,12 +28,25 @@ run = "go mod download"
 
 [tasks.fmt]
 description = "Format Go source"
-run = "gofumpt -w ."
+run = '''
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+git ls-files --cached --others --exclude-standard -z -- '*.go' > "$tmp"
+if [ -s "$tmp" ]; then
+  xargs -0 gofumpt -w < "$tmp"
+fi
+'''
 
 [tasks."fmt:check"]
 description = "Check Go formatting"
 run = '''
-files="$(gofumpt -l .)"
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+git ls-files --cached --others --exclude-standard -z -- '*.go' > "$tmp"
+if [ ! -s "$tmp" ]; then
+  exit 0
+fi
+files="$(xargs -0 gofumpt -l < "$tmp")"
 if [ -n "$files" ]; then
   printf '%s\n' "$files"
   exit 1
@@ -80,13 +93,9 @@ run = [
   "GOTOOLCHAIN=go1.27rc2 go test -trimpath -race -count=1 ./...",
 ]
 
-[tasks."test:cover"]
-description = "Report coverage with all analyzer syntax enabled"
-run = [
-  "mkdir -p coverage",
-  "GOTOOLCHAIN=go1.27rc2 go test -trimpath -count=1 -covermode=atomic -coverprofile=coverage/go.out ./...",
-  "GOTOOLCHAIN=go1.27rc2 go tool cover -func=coverage/go.out",
-]
+[tasks.bench]
+description = "Benchmark analyzer classification"
+run = "go test -trimpath -run=^$ -bench=. -benchmem ./..."
 
 [tasks.secrets]
 description = "Scan the repository for secrets"
@@ -107,6 +116,5 @@ depends = [
   "secrets",
   "test",
   "test:compat",
-  "test:cover",
   "test:race",
 ]
