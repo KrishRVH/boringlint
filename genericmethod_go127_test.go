@@ -31,6 +31,8 @@ func (Box[T]) Value() T {
 func Map[T, U any](value T, convert func(T) U) U {
 	return convert(value)
 }
+
+type Wrapper[T any] struct{ Box[T] }
 `,
 		"project/project.go": `package project
 
@@ -38,6 +40,13 @@ import "dependency"
 
 func use(box dependency.Box[int]) {
 	_ = box.Map[string](func(int) string { return "" }) // want "use of generic method Map"
+	_ = box.Map(func(int) string { return "" })         // want "use of generic method Map"
+	methodValue := box.Map[string]                       // want "use of generic method Map"
+	_ = methodValue
+	methodExpression := dependency.Box[int].Map[string] // want "use of generic method Map"
+	_ = methodExpression
+	var wrapper dependency.Wrapper[int]
+	_ = wrapper.Map[string] // want "use of generic method Map"
 	_ = box.Value()
 	_ = dependency.Map(1, func(int) string { return "" })
 }
@@ -93,5 +102,9 @@ func TestHasMethodTypeParameters(t *testing.T) {
 	)
 	if hasMethodTypeParameters(receiverGenericMethod) {
 		t.Fatal("receiver type parameters were recognized as method-local type parameters")
+	}
+
+	if hasMethodTypeParameters(types.NewTypeName(token.NoPos, nil, "NotAFunction", nil)) {
+		t.Fatal("non-function object was recognized as a generic method")
 	}
 }

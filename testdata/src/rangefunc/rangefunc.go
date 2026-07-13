@@ -1,6 +1,6 @@
 package rangefunc
 
-import "iter"
+import "iter" // want `import of iter is forbidden`
 
 type localSeq func(func(string) bool) // want `iterator-shaped type`
 
@@ -52,6 +52,22 @@ func makeIterSeq() iter.Seq[int] { // want `iterator-shaped type`
 	}
 }
 
+func makeIterSeq2() iter.Seq2[string, int] { // want `iterator-shaped type`
+	return func(yield func(string, int) bool) {
+		yield("answer", 42)
+	}
+}
+
+func emptySeq(yield func() bool) { // want `iterator-shaped type`
+	yield()
+}
+
+type source struct{}
+
+func (source) values(yield func(int) bool) { // want `iterator-shaped type`
+	yield(1)
+}
+
 func rangeFunctions() {
 	for value := range yieldFunc { // want `range over a function value`
 		_ = value
@@ -60,6 +76,14 @@ func rangeFunctions() {
 		_ = value
 	}
 	for value := range makeIterSeq() { // want `range over a function value`
+		_ = value
+	}
+	for key, value := range makeIterSeq2() { // want `range over a function value`
+		_, _ = key, value
+	}
+	for range emptySeq { // want `range over a function value`
+	}
+	for value := range (source{}).values { // want `range over a function value`
 		_ = value
 	}
 }

@@ -6,8 +6,17 @@ import (
 	"go/token"
 	"testing"
 
+	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
+
+func TestAnalyzersAreValid(t *testing.T) {
+	t.Parallel()
+
+	if err := analysis.Validate([]*analysis.Analyzer{NoIterator, NoGenericMethod}); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestNoIterator(t *testing.T) {
 	t.Parallel()

@@ -1,0 +1,21 @@
+# Build and test output
+/.cache/
+/coverage/
+/*.test
+/boringlint
+
+# Local mise state
+mise.local.toml
+mise.*.local.toml
+.mise.local.toml
+.mise.*.local.toml
+mise.local.lock
+mise.*.local.lock
+.mise.local.lock
+.mise.*.local.lock
+
+# Editor and OS noise
+.DS_Store
+*.swp
+*.swo
+*~

@@ -5,16 +5,20 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"strconv"
 
 	"golang.org/x/tools/go/analysis"
 )
 
-// NoIterator rejects iterator-shaped type and function declarations and
-// range-over-function.
+// NoIterator rejects direct iter imports, iterator-shaped type and function
+// declarations, and range-over-function.
 var NoIterator = &analysis.Analyzer{
 	Name: "noiterator",
-	Doc:  "forbid iterator-shaped type and function declarations and range-over-function; materialize dependency iterators at the call boundary",
-	Run:  runNoIterator,
+	Doc: "reject range-over-function and iterator declarations\n\n" +
+		"noiterator rejects direct iter imports, range-over-function, and " +
+		"iterator-shaped type and function declarations",
+	URL: "https://github.com/KrishRVH/boringlint#noiterator",
+	Run: runNoIterator,
 }
 
 func runNoIterator(pass *analysis.Pass) (any, error) {
@@ -29,6 +33,15 @@ func runNoIterator(pass *analysis.Pass) (any, error) {
 
 func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 	switch node := node.(type) {
+	case *ast.ImportSpec:
+		path, err := strconv.Unquote(node.Path.Value)
+		if err == nil && path == "iter" {
+			pass.Reportf(
+				node.Path.Pos(),
+				"import of iter is forbidden by boringlint; accept dependency iterators without naming their type and materialize them at the boundary",
+			)
+		}
+		return false
 	case *ast.FuncDecl:
 		if object := pass.TypesInfo.Defs[node.Name]; object != nil {
 			reportIteratorType(pass, node.Name.Pos(), object.Type())
@@ -123,7 +136,8 @@ func isIteratorSignature(signature *types.Signature) bool {
 }
 
 func isYieldSignature(signature *types.Signature) bool {
-	return signature.Params().Len() <= 2 &&
+	return !signature.Variadic() &&
+		signature.Params().Len() <= 2 &&
 		signature.Results().Len() == 1 &&
 		types.Identical(signature.Results().At(0).Type(), types.Typ[types.Bool])
 }
@@ -173,15 +187,18 @@ func hasAssignableSignature(
 // NoGenericMethod rejects generic method declarations and selections.
 var NoGenericMethod = &analysis.Analyzer{
 	Name: "nogenericmethod",
-	Doc:  "forbid generic method declarations and uses introduced in Go 1.27; use a package-level generic function",
-	Run:  runNoGenericMethod,
+	Doc: "reject generic method declarations and uses\n\n" +
+		"nogenericmethod rejects method-local type parameters introduced in Go 1.27; " +
+		"use a package-level generic function",
+	URL: "https://github.com/KrishRVH/boringlint#nogenericmethod",
+	Run: runNoGenericMethod,
 }
 
 func runNoGenericMethod(pass *analysis.Pass) (any, error) {
 	for _, file := range pass.Files {
 		reportGenericMethods(file, func(decl *ast.FuncDecl) {
 			pass.Reportf(
-				decl.Pos(),
+				decl.Name.Pos(),
 				"generic method %s declares method-local type parameters, which are forbidden by boringlint; use a package-level generic function",
 				decl.Name.Name,
 			)

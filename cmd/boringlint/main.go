@@ -2,13 +2,13 @@
 package main
 
 import (
-	"golang.org/x/tools/go/analysis/unitchecker"
+	"golang.org/x/tools/go/analysis/multichecker"
 
 	"github.com/KrishRVH/boringlint"
 )
 
 func main() {
-	unitchecker.Main(
+	multichecker.Main(
 		boringlint.NoIterator,
 		boringlint.NoGenericMethod,
 	)

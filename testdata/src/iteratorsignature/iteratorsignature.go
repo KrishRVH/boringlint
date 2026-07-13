@@ -6,6 +6,14 @@ type SequenceAlias = func(func(string) bool) // want `iterator-shaped type`
 
 type GenericSequence[T any] func(func(T) bool) // want `iterator-shaped type`
 
+type EmptySequence func(func() bool) // want `iterator-shaped type`
+
+type PairSequence func(func(string, int) bool) // want `iterator-shaped type`
+
+type NamedYield func(int) bool
+
+type NamedYieldSequence func(NamedYield) // want `iterator-shaped type`
+
 type SequenceConstraint[T any] interface {
 	~func(func(T) bool) // want `iterator-shaped type`
 }
@@ -41,6 +49,22 @@ func GenericYield[Y YieldFunc[int]](yield Y) { // want `iterator-shaped type`
 type Predicate func(int) bool
 
 type Handler func(func(int) bool) error
+
+type BoolAlias = bool
+
+type AliasBoolSequence func(func(int) BoolAlias) // want `iterator-shaped type`
+
+type NamedBool bool
+
+type NamedBoolSequence func(func(int) NamedBool)
+
+type VariadicSequence func(func(...int) bool)
+
+type MixedVariadicSequence func(func(int, ...string) bool)
+
+var IteratorValue = func(yield func(int) bool) {
+	_ = yield
+}
 
 func Apply(predicate func(int) bool) bool {
 	return predicate(1)
