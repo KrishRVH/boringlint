@@ -8,8 +8,8 @@ Go. The module is pre-v1 while the rules and public analyzer API settle.
 
 ## Install and run
 
-Install the command with the same or a newer Go toolchain than the code it will
-analyze:
+After publishing a tagged release, install the command with the same or a newer
+Go toolchain than the code it will analyze:
 
 ```sh
 go install github.com/KrishRVH/boringlint/cmd/boringlint@latest
