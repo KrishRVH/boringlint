@@ -20,7 +20,8 @@ Repository development goes through mise:
 - `mise run tasks`: list tasks.
 - `mise run standards`: format source and tidy the module.
 - `mise run test`: run the primary tests.
-- `mise run test:compat`: test Go 1.25 and Go 1.27 behavior.
+- `mise run test:compat`: test Go 1.25 compatibility and Go 1.27 behavior,
+  including `nogenericmethod` diagnostics.
 - `mise run standards:check`: run the complete release gate.
 
 Do not invoke package managers, compilers, linters, or test runners directly
@@ -34,7 +35,9 @@ unless repairing the corresponding mise task.
 - Treat `testdata/` as behavioral fixtures, not example applications.
 - Set the public minimum Go version in `go.mod`; pin the development toolchain
   separately in `.config/mise/config.toml`.
-- Do not hand-edit `.config/mise/mise.lock`; run `mise run lock`.
+- Before each release, review the pinned mise tools and CI mise runtime.
+- Do not hand-edit `.config/mise/mise.lock`; after changing mise tool pins, run
+  `mise run lock`.
 - Do not commit `.cache/`, coverage output, binaries, dependencies, or secrets.
 
 Before handoff, run `mise run standards:check` and report any skipped check.

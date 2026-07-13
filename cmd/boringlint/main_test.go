@@ -12,6 +12,17 @@ func TestCommand(t *testing.T) {
 	t.Parallel()
 
 	binary := buildCommand(t)
+	command := exec.CommandContext(t.Context(), binary, "help") // #nosec G204 -- binary is built by this test.
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("list analyzers: %v\n%s", err, output)
+	}
+	for _, analyzer := range []string{"noiterator", "nogenericmethod"} {
+		if !bytes.Contains(output, []byte(analyzer)) {
+			t.Errorf("help output does not contain %q:\n%s", analyzer, output)
+		}
+	}
+
 	testCommandModes(
 		t,
 		binary,

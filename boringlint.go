@@ -14,7 +14,7 @@ import (
 // function, and method declarations, and range-over-function.
 var NoIterator = &analysis.Analyzer{
 	Name: "noiterator",
-	Doc: "reject range-over-function and iterator-shaped types in declarations\n\n" +
+	Doc: "reject range-over-function and iterator-shaped types in project type, function, and method declarations\n\n" +
 		"noiterator rejects direct iter imports, range-over-function, and " +
 		"iterator-shaped types in project type, function, and method declarations",
 	URL: "https://github.com/KrishRVH/boringlint#noiterator",

@@ -2,6 +2,9 @@
 
 package rangefunc
 
+// Before Go 1.27, go/types admits variadic-yield range operands; Go 1.27
+// rejects them during type checking. These cases keep the range guard aligned
+// with every function range that reaches analysis.
 type variadicSequence interface {
 	~func(func(...int) bool)
 }

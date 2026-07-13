@@ -97,9 +97,10 @@ materialized without naming the iterator type:
 values := slices.Collect(dependency.Values())
 ```
 
-The rule intentionally governs imports, range statements, and types in project
-declarations. It does not attempt an expression-level ban on every value whose
-type happens to be iterator-shaped.
+The rule intentionally governs imports, range statements, and iterator-shaped
+types in project type, function, and method declarations. Variable declarations
+remain allowed; the rule does not attempt an expression-level ban on every value
+whose type happens to be iterator-shaped.
 
 ### `nogenericmethod`
 

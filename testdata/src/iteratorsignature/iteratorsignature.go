@@ -78,6 +78,8 @@ var IteratorValue = func(yield func(int) bool) {
 	_ = yield
 }
 
+var ExplicitIteratorValue func(func(int) bool)
+
 func Apply(predicate func(int) bool) bool {
 	return predicate(1)
 }
