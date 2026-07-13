@@ -1,0 +1,112 @@
+min_version = "2026.7.0"
+
+[settings]
+jobs = 2
+lockfile = true
+
+[env]
+GOTOOLCHAIN = "local"
+
+[tools]
+go = "1.26.5"
+gofumpt = "0.10.0"
+gitleaks = "8.30.1"
+golangci-lint = "2.12.2"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.4.0"
+
+[tasks.tasks]
+description = "List available project tasks"
+run = "mise tasks"
+
+[tasks.lock]
+description = "Refresh the mise lockfile after tool-version changes"
+run = "mise lock"
+
+[tasks.install]
+description = "Download Go module dependencies"
+run = "go mod download"
+
+[tasks.fmt]
+description = "Format Go source"
+run = "gofumpt -w ."
+
+[tasks."fmt:check"]
+description = "Check Go formatting"
+run = '''
+files="$(gofumpt -l .)"
+if [ -n "$files" ]; then
+  printf '%s\n' "$files"
+  exit 1
+fi
+'''
+
+[tasks."mod:tidy"]
+description = "Tidy module files"
+run = "go mod tidy"
+
+[tasks."mod:check"]
+description = "Check module tidiness"
+run = "go mod tidy -diff"
+
+[tasks."mod:verify"]
+description = "Verify downloaded modules"
+depends = ["install"]
+run = "go mod verify"
+
+[tasks.build]
+description = "Build the package and command"
+run = ["mkdir -p .cache", "go build -trimpath -o .cache/boringlint ./cmd/boringlint"]
+
+[tasks.lint]
+description = "Run static and vulnerability analysis"
+run = [
+  "go vet ./...",
+  "golangci-lint run ./...",
+  "govulncheck -test ./...",
+]
+
+[tasks.test]
+description = "Run tests"
+run = "go test -trimpath -count=1 ./..."
+
+[tasks."test:race"]
+description = "Run tests with the race detector"
+run = "go test -trimpath -race -count=1 ./..."
+
+[tasks."test:compat"]
+description = "Test the minimum supported and next Go releases"
+run = [
+  "GOTOOLCHAIN=go1.25.12 go test -trimpath -count=1 ./...",
+  "GOTOOLCHAIN=go1.27rc2 go test -trimpath -race -count=1 ./...",
+]
+
+[tasks."test:cover"]
+description = "Report coverage with all analyzer syntax enabled"
+run = [
+  "mkdir -p coverage",
+  "GOTOOLCHAIN=go1.27rc2 go test -trimpath -count=1 -covermode=atomic -coverprofile=coverage/go.out ./...",
+  "GOTOOLCHAIN=go1.27rc2 go tool cover -func=coverage/go.out",
+]
+
+[tasks.secrets]
+description = "Scan the repository for secrets"
+run = "gitleaks dir . --redact --no-banner"
+
+[tasks.standards]
+description = "Apply formatting and module maintenance"
+run = [{ task = "fmt" }, { task = "mod:tidy" }]
+
+[tasks."standards:check"]
+description = "Run the complete release gate"
+depends = [
+  "build",
+  "fmt:check",
+  "lint",
+  "mod:check",
+  "mod:verify",
+  "secrets",
+  "test",
+  "test:compat",
+  "test:cover",
+  "test:race",
+]
