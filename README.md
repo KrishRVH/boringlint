@@ -1,5 +1,7 @@
 # boringlint
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/KrishRVH/boringlint.svg)](https://pkg.go.dev/github.com/KrishRVH/boringlint)
+
 `boringlint` enforces a deliberately restricted Go dialect: direct data and
 control flow over language machinery that hides either one.
 
@@ -8,8 +10,8 @@ Go. The module is pre-v1 while the rules and public analyzer API settle.
 
 ## Install and run
 
-After publishing a tagged release, install the command with the same or a newer
-Go toolchain than the code it will analyze:
+Install the command with the same or a newer Go toolchain than the code it will
+analyze:
 
 ```sh
 go install github.com/KrishRVH/boringlint/cmd/boringlint@latest
