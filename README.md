@@ -26,6 +26,23 @@ go vet -vettool="$(command -v boringlint)" ./...
 Run both commands. `-vettool` selects `boringlint` in place of the standard vet
 analyzers; it does not add checks to the standard set.
 
+## Suppression
+
+Per-site suppression is deliberately absent: `//nolint` is a golangci-lint
+convention ignored by standalone and vettool modes, and a policy linter with
+site-level escape hatches stops being policy. Select only one analyzer for an
+invocation:
+
+```sh
+boringlint -noiterator ./...
+go vet -vettool="$(command -v boringlint)" -noiterator ./...
+```
+
+Explicit package patterns restrict analysis in either mode. A custom
+[golangci-lint v2 module-plugin adapter](https://golangci-lint.run/docs/plugins/module-plugins/)
+can register the exported analyzers by rule name, after which golangci-lint
+honors `//nolint:noiterator`; `boringlint` does not ship that adapter.
+
 ## Go version support
 
 `boringlint`'s source-project floor is Go 1.23, which introduced
