@@ -8,6 +8,8 @@ import (
 	"strconv"
 
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/passes/inspect"
+	"golang.org/x/tools/go/ast/inspector"
 )
 
 // NoIterator rejects direct iter imports, iterator-shaped types in project type,
@@ -17,16 +19,27 @@ var NoIterator = &analysis.Analyzer{
 	Doc: "reject range-over-function and iterator-shaped types in project type, function, and method declarations\n\n" +
 		"noiterator rejects direct iter imports, range-over-function, and " +
 		"iterator-shaped types in project type, function, and method declarations",
-	URL: "https://github.com/KrishRVH/boringlint#noiterator",
-	Run: runNoIterator,
+	URL:      "https://github.com/KrishRVH/boringlint#noiterator",
+	Requires: []*analysis.Analyzer{inspect.Analyzer},
+	Run:      runNoIterator,
 }
 
 func runNoIterator(pass *analysis.Pass) (any, error) {
-	for _, file := range pass.Files {
-		ast.Inspect(file, func(node ast.Node) bool {
+	inspection := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
+	inspection.Nodes(
+		[]ast.Node{
+			(*ast.ImportSpec)(nil),
+			(*ast.FuncDecl)(nil),
+			(*ast.TypeSpec)(nil),
+			(*ast.RangeStmt)(nil),
+		},
+		func(node ast.Node, push bool) bool {
+			if !push {
+				return true
+			}
 			return inspectIteratorNode(pass, node)
-		})
-	}
+		},
+	)
 	//nolint:nilnil // analysis.Analyzer uses a nil result to mean no exported fact.
 	return nil, nil
 }
@@ -211,8 +224,9 @@ var NoGenericMethod = &analysis.Analyzer{
 	Doc: "reject generic method declarations and uses\n\n" +
 		"nogenericmethod rejects method-local type parameters introduced in Go 1.27; " +
 		"use a package-level generic function",
-	URL: "https://github.com/KrishRVH/boringlint#nogenericmethod",
-	Run: runNoGenericMethod,
+	URL:      "https://github.com/KrishRVH/boringlint#nogenericmethod",
+	Requires: []*analysis.Analyzer{inspect.Analyzer},
+	Run:      runNoGenericMethod,
 }
 
 func runNoGenericMethod(pass *analysis.Pass) (any, error) {
@@ -224,25 +238,22 @@ func runNoGenericMethod(pass *analysis.Pass) (any, error) {
 				decl.Name.Name,
 			)
 		})
-
-		ast.Inspect(file, func(node ast.Node) bool {
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			selection := pass.TypesInfo.Selections[selector]
-			if selection == nil || !hasMethodTypeParameters(selection.Obj()) {
-				return true
-			}
-
-			pass.Reportf(
-				selector.Sel.Pos(),
-				"use of generic method %s is forbidden by boringlint; use a package-level generic function",
-				selector.Sel.Name,
-			)
-			return true
-		})
 	}
+
+	inspection := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
+	inspection.Preorder([]ast.Node{(*ast.SelectorExpr)(nil)}, func(node ast.Node) {
+		selector := node.(*ast.SelectorExpr)
+		selection := pass.TypesInfo.Selections[selector]
+		if selection == nil || !hasMethodTypeParameters(selection.Obj()) {
+			return
+		}
+
+		pass.Reportf(
+			selector.Sel.Pos(),
+			"use of generic method %s is forbidden by boringlint; use a package-level generic function",
+			selector.Sel.Name,
+		)
+	})
 	//nolint:nilnil // analysis.Analyzer uses a nil result to mean no exported fact.
 	return nil, nil
 }
