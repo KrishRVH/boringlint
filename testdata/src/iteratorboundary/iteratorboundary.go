@@ -5,21 +5,21 @@ import (
 	"slices"
 )
 
-type SequenceAlias = iteratorprovider.Sequence[int] // want `iterator-shaped type`
+type SequenceAlias = iteratorprovider.Sequence[int] // want `contains an iterator-shaped term`
 
 type EmbeddedSequence interface {
-	iteratorprovider.Sequence[int] // want `iterator-shaped type`
+	iteratorprovider.Sequence[int] // want `contains an iterator-shaped term`
 }
 
-type HeterogeneousSequenceAlias = iteratorprovider.HeterogeneousSequence // want `iterator-shaped type`
+type HeterogeneousSequenceAlias = iteratorprovider.HeterogeneousSequence // want `contains an iterator-shaped term`
 
-type MixedSequenceAlias = iteratorprovider.SequenceOrSlice // want `iterator-shaped type`
+type MixedSequenceAlias = iteratorprovider.SequenceOrSlice // want `contains an iterator-shaped term`
 
-type TransitiveSequenceAlias = iteratorprovider.TransitiveSequence // want `iterator-shaped type`
+type TransitiveSequenceAlias = iteratorprovider.TransitiveSequence // want `contains an iterator-shaped term`
 
-type EmptySequenceAlias = iteratorprovider.EmptySequence // want `iterator-shaped type`
+type EmptySequenceAlias = iteratorprovider.EmptySequence // want `contains an iterator-shaped term`
 
-type GenericSequenceHolder[T iteratorprovider.HeterogeneousSequence] struct { // want `iterator-shaped type`
+type GenericSequenceHolder[T iteratorprovider.HeterogeneousSequence] struct { // want `contains an iterator-shaped term`
 	Value T
 }
 

@@ -202,16 +202,12 @@ func reportIteratorType(pass *analysis.Pass, position token.Pos, typ types.Type)
 		return false
 	}
 
-	reportIteratorTypeDiagnostic(pass, position, typ)
-	return true
-}
-
-func reportIteratorTypeDiagnostic(pass *analysis.Pass, position token.Pos, typ types.Type) {
 	pass.Reportf(
 		position,
 		"iterator-shaped type %s is forbidden by boringlint; materialize dependency iterators at the call boundary",
 		types.TypeString(typ, types.RelativeTo(pass.Pkg)),
 	)
+	return true
 }
 
 func reportIteratorTypeTerms(pass *analysis.Pass, roots ...ast.Node) {
@@ -238,7 +234,11 @@ func reportIteratorTypeTerms(pass *analysis.Pass, roots ...ast.Node) {
 				return true
 			}
 
-			reportIteratorTypeDiagnostic(pass, expr.Pos(), typ)
+			pass.Reportf(
+				expr.Pos(),
+				"constraint %s contains an iterator-shaped term, which is forbidden by boringlint; materialize dependency iterators at the call boundary",
+				types.TypeString(typ, types.RelativeTo(pass.Pkg)),
+			)
 			return false
 		})
 	}

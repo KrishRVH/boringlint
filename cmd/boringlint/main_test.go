@@ -90,7 +90,7 @@ func use() {
 				directory,
 				"./clean",
 				"./diagnostic",
-				"iterator-shaped type example.com/target/dependency.Sequence[int]",
+				"constraint example.com/target/dependency.Sequence[int] contains an iterator-shaped term",
 			)
 		})
 	}
