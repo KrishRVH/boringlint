@@ -119,6 +119,16 @@ types in project type, function, and method declarations. Variable declarations
 remain allowed; the rule does not attempt an expression-level ban on every value
 whose type happens to be iterator-shaped.
 
+#### Why
+
+The [`iter.Seq` protocol](https://pkg.go.dev/iter#Seq) is push-based: the
+producer advances the sequence by invoking a caller-provided `yield` function.
+Range-over-function presents that callback as ordinary loop syntax;
+[`iter.Pull`](https://pkg.go.dev/iter#Pull) recovers caller-driven advancement
+with `next`, but callers that abandon the sequence must invoke `stop`.
+Materializing dependency iterators at the boundary keeps that protocol out of
+project declarations and restores ordinary range over concrete collections.
+
 ### `nogenericmethod`
 
 Rejects method-local type parameters introduced in Go 1.27, in both method
@@ -134,6 +144,15 @@ func Map[T, U any](box Box[T], convert func(T) U) U { // allowed
 	return convert(box.value)
 }
 ```
+
+#### Why
+
+[Go 1.27](https://go.dev/doc/go1.27#language) permits neither type parameters on
+interface methods nor generic methods as interface-method implementations. On
+a generic receiver, method-local type parameters layer method instantiation on
+top of receiver instantiation. A package-level generic function makes the
+receiver an ordinary argument and keeps generic operations in a single
+package-level namespace.
 
 ## Use as a package
 

@@ -17,8 +17,10 @@ import (
 var NoIterator = &analysis.Analyzer{
 	Name: "noiterator",
 	Doc: "reject range-over-function and iterator-shaped types in project type, function, and method declarations\n\n" +
-		"noiterator rejects direct iter imports, range-over-function, and " +
-		"iterator-shaped types in project type, function, and method declarations",
+		"noiterator reports direct iter imports, function-valued range operands, and " +
+		"iterator-shaped constraints, fields, parameters, and results. Accept dependency " +
+		"iterators without naming their type, materialize them at the call boundary, and " +
+		"iterate concrete data.",
 	URL:      "https://github.com/KrishRVH/boringlint#noiterator",
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 	Run:      runNoIterator,
@@ -222,8 +224,9 @@ func hasAssignableSignature(
 var NoGenericMethod = &analysis.Analyzer{
 	Name: "nogenericmethod",
 	Doc: "reject generic method declarations and uses\n\n" +
-		"nogenericmethod rejects method-local type parameters introduced in Go 1.27; " +
-		"use a package-level generic function",
+		"nogenericmethod reports method declarations with method-local type parameters and " +
+		"selector expressions that resolve to those methods. Methods using only receiver " +
+		"type parameters remain allowed; use a package-level generic function instead.",
 	URL:      "https://github.com/KrishRVH/boringlint#nogenericmethod",
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 	Run:      runNoGenericMethod,
