@@ -55,9 +55,20 @@ func use() {
 	}
 }
 `)
+			writeTestFile(t, filepath.Join(directory, "dependency", "dependency.go"), `package dependency
+
+type Sequence[T any] interface {
+	~func(func(T) bool)
+}
+`)
 			writeTestFile(t, filepath.Join(directory, "diagnostic", "diagnostic.go"), `package diagnostic
 
-import "iter"
+import (
+	"example.com/target/dependency"
+	"iter"
+)
+
+type SequenceAlias = dependency.Sequence[int]
 
 func values(yield func(int) bool) {
 	yield(1)
@@ -73,7 +84,14 @@ func use() {
 }
 `)
 
-			testCommandModes(t, binary, directory, "./clean", "./diagnostic")
+			testCommandModes(
+				t,
+				binary,
+				directory,
+				"./clean",
+				"./diagnostic",
+				"iterator-shaped type example.com/target/dependency.Sequence[int]",
+			)
 		})
 	}
 }
@@ -84,6 +102,7 @@ func testCommandModes(
 	directory string,
 	cleanTarget string,
 	diagnosticTarget string,
+	extraDiagnostics ...string,
 ) {
 	t.Helper()
 
@@ -109,13 +128,16 @@ func testCommandModes(
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			diagnostics := append(
+				[]string{"import of iter is forbidden", "range over a function value"},
+				extraDiagnostics...,
+			)
 			assertDiagnostics(
 				t,
 				directory,
 				test.executable,
 				test.diagnosticArguments,
-				"import of iter is forbidden",
-				"range over a function value",
+				diagnostics...,
 			)
 			assertSuccess(t, directory, test.executable, test.cleanArguments)
 		})

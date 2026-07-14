@@ -30,7 +30,7 @@ type onlySeq interface {
 }
 
 type onlySlice interface {
-	seqOrSlice
+	seqOrSlice // want `iterator-shaped type`
 	~[]int
 }
 

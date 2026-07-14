@@ -13,14 +13,16 @@ import (
 )
 
 // NoIterator rejects direct iter imports, iterator-shaped types in project type,
-// function, and method declarations, and range-over-function.
+// function, and method declarations, iterator terms hidden by named constraints
+// in project type declarations, and range-over-function.
 var NoIterator = &analysis.Analyzer{
 	Name: "noiterator",
 	Doc: "reject range-over-function and iterator-shaped types in project type, function, and method declarations\n\n" +
 		"noiterator reports direct iter imports, function-valued range operands, and " +
 		"iterator-shaped constraints, fields, parameters, and results. Accept dependency " +
 		"iterators without naming their type, materialize them at the call boundary, and " +
-		"iterate concrete data.",
+		"iterate concrete data. Project type declarations also cannot hide iterator-shaped " +
+		"terms behind named constraints, including mixed unions and narrowed intersections.",
 	URL:      "https://github.com/KrishRVH/boringlint#noiterator",
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 	Run:      runNoIterator,
@@ -63,11 +65,7 @@ func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 		}
 		reportIteratorTypes(pass, node.Type)
 	case *ast.TypeSpec:
-		if node.TypeParams == nil {
-			reportIteratorTypes(pass, node.Type)
-		} else {
-			reportIteratorTypes(pass, node.TypeParams, node.Type)
-		}
+		reportIteratorTypeSpec(pass, node)
 		return false
 	case *ast.RangeStmt:
 		typ := pass.TypesInfo.TypeOf(node.X)
@@ -84,6 +82,19 @@ func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 	return true
 }
 
+func reportIteratorTypeSpec(pass *analysis.Pass, node *ast.TypeSpec) {
+	if node.TypeParams == nil {
+		if !reportIteratorTypes(pass, node.Type) {
+			reportIteratorTypeTerms(pass, node.Type)
+		}
+		return
+	}
+
+	if !reportIteratorTypes(pass, node.TypeParams, node.Type) {
+		reportIteratorTypeTerms(pass, node.TypeParams, node.Type)
+	}
+}
+
 type iteratorConstraint struct {
 	position   token.Pos
 	typeParams []*types.TypeParam
@@ -95,15 +106,16 @@ type iteratorTypeReporter struct {
 	reportedTypeParams map[*types.TypeParam]bool
 }
 
-func reportIteratorTypes(pass *analysis.Pass, roots ...ast.Node) {
+func reportIteratorTypes(pass *analysis.Pass, roots ...ast.Node) bool {
 	reporter := iteratorTypeReporter{
 		pass:               pass,
 		reportedTypeParams: make(map[*types.TypeParam]bool),
 	}
+	reported := false
 	for _, root := range roots {
-		reporter.walk(root)
+		reported = reporter.walk(root) || reported
 	}
-	reporter.reportPendingConstraints()
+	return reporter.reportPendingConstraints() || reported
 }
 
 func (reporter *iteratorTypeReporter) walk(root ast.Node) bool {
@@ -165,13 +177,15 @@ func (reporter *iteratorTypeReporter) reportExpression(expr ast.Expr) bool {
 	return true
 }
 
-func (reporter *iteratorTypeReporter) reportPendingConstraints() {
+func (reporter *iteratorTypeReporter) reportPendingConstraints() bool {
+	reported := false
 	for _, constraint := range reporter.pendingConstraints {
 		if reporter.typeParamWasReported(constraint.typeParams) {
 			continue
 		}
-		reportIteratorType(reporter.pass, constraint.position, constraint.typeParams[0])
+		reported = reportIteratorType(reporter.pass, constraint.position, constraint.typeParams[0]) || reported
 	}
+	return reported
 }
 
 func (reporter *iteratorTypeReporter) typeParamWasReported(typeParams []*types.TypeParam) bool {
@@ -188,12 +202,46 @@ func reportIteratorType(pass *analysis.Pass, position token.Pos, typ types.Type)
 		return false
 	}
 
+	reportIteratorTypeDiagnostic(pass, position, typ)
+	return true
+}
+
+func reportIteratorTypeDiagnostic(pass *analysis.Pass, position token.Pos, typ types.Type) {
 	pass.Reportf(
 		position,
 		"iterator-shaped type %s is forbidden by boringlint; materialize dependency iterators at the call boundary",
 		types.TypeString(typ, types.RelativeTo(pass.Pkg)),
 	)
-	return true
+}
+
+func reportIteratorTypeTerms(pass *analysis.Pass, roots ...ast.Node) {
+	for _, root := range roots {
+		ast.Inspect(root, func(node ast.Node) bool {
+			expr, ok := node.(ast.Expr)
+			if !ok {
+				return true
+			}
+			switch expr.(type) {
+			case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr, *ast.IndexListExpr:
+			default:
+				return true
+			}
+
+			typ := pass.TypesInfo.TypeOf(expr)
+			switch typ.(type) {
+			case *types.Alias, *types.Named:
+			default:
+				return true
+			}
+
+			if !hasAcceptedSignature(typ, nil, isIteratorSignature, make(map[types.Type]bool)) {
+				return true
+			}
+
+			reportIteratorTypeDiagnostic(pass, expr.Pos(), typ)
+			return false
+		})
+	}
 }
 
 func isIteratorType(typ types.Type) bool {
@@ -207,7 +255,7 @@ func isIteratorType(typ types.Type) bool {
 	}
 
 	typeParam, ok := typ.(*types.TypeParam)
-	return ok && hasAssignableSignature(
+	return ok && hasAcceptedSignature(
 		typeParam.Constraint(),
 		typeParam,
 		isIteratorSignature,
@@ -226,7 +274,7 @@ func isIteratorSignature(signature *types.Signature) bool {
 	}
 
 	typeParam, ok := yieldType.(*types.TypeParam)
-	return ok && hasAssignableSignature(
+	return ok && hasAcceptedSignature(
 		typeParam.Constraint(),
 		typeParam,
 		isYieldSignature,
@@ -254,7 +302,7 @@ func isRangeFunctionType(typ types.Type) bool {
 	}
 
 	typeParam, ok := typ.(*types.TypeParam)
-	return ok && hasAssignableSignature(
+	return ok && hasAcceptedSignature(
 		typeParam.Constraint(),
 		typeParam,
 		func(*types.Signature) bool { return true },
@@ -262,17 +310,20 @@ func isRangeFunctionType(typ types.Type) bool {
 	)
 }
 
-// An iterator-shaped type parameter has a common underlying signature. Find a
-// candidate in the constraint, then let go/types prove that every possible type
-// is assignable to it.
+// Find an accepted signature term in typ. When typeParam is non-nil, let
+// go/types also prove that every possible type is assignable to the candidate.
 //
 //nolint:gocognit // Constraint graphs require recursive handling of each go/types node kind.
-func hasAssignableSignature(
+func hasAcceptedSignature(
 	typ types.Type,
 	typeParam *types.TypeParam,
 	accept func(*types.Signature) bool,
 	seen map[types.Type]bool,
 ) bool {
+	if typ == nil {
+		return false
+	}
+
 	typ = types.Unalias(typ)
 	if seen[typ] {
 		return false
@@ -280,23 +331,24 @@ func hasAssignableSignature(
 	seen[typ] = true
 
 	if signature, ok := typ.Underlying().(*types.Signature); ok {
-		return accept(signature) && types.AssignableTo(typeParam, signature)
+		return accept(signature) &&
+			(typeParam == nil || types.AssignableTo(typeParam, signature))
 	}
 
 	switch typ := typ.(type) {
 	case *types.TypeParam:
-		return hasAssignableSignature(typ.Constraint(), typeParam, accept, seen)
+		return hasAcceptedSignature(typ.Constraint(), typeParam, accept, seen)
 	case *types.Named:
-		return hasAssignableSignature(typ.Underlying(), typeParam, accept, seen)
+		return hasAcceptedSignature(typ.Underlying(), typeParam, accept, seen)
 	case *types.Interface:
 		for index := range typ.NumEmbeddeds() {
-			if hasAssignableSignature(typ.EmbeddedType(index), typeParam, accept, seen) {
+			if hasAcceptedSignature(typ.EmbeddedType(index), typeParam, accept, seen) {
 				return true
 			}
 		}
 	case *types.Union:
 		for index := range typ.Len() {
-			if hasAssignableSignature(typ.Term(index).Type(), typeParam, accept, seen) {
+			if hasAcceptedSignature(typ.Term(index).Type(), typeParam, accept, seen) {
 				return true
 			}
 		}

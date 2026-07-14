@@ -92,12 +92,16 @@ Rejects:
 - direct imports of `iter`;
 - Go 1.23 range-over-function;
 - iterator-shaped types in project type, function, and method declarations,
-  including constraints, fields, parameters, and results.
+  including constraints, fields, parameters, and results;
+- project type declarations that name constraints containing iterator-shaped
+  terms, including mixed unions and intersections that eliminate those terms.
 
 ```go
 import "iter" // rejected
 
 type Sequence func(func(int) bool) // rejected
+
+type MaybeSequence = dependency.SequenceOrSlice // rejected
 
 func Values(yield func(int) bool) { // rejected
 	// ...
