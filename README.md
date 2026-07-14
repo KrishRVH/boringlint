@@ -30,8 +30,8 @@ analyzers; it does not add checks to the standard set.
 
 Per-site suppression is deliberately absent: `//nolint` is a golangci-lint
 convention ignored by standalone and vettool modes, and a policy linter with
-site-level escape hatches stops being policy. Select only one analyzer for an
-invocation:
+site-level escape hatches stops being policy. To run only one analyzer, select
+it for the invocation:
 
 ```sh
 boringlint -noiterator ./...
@@ -132,8 +132,8 @@ project declarations and restores ordinary range over concrete collections.
 ### `nogenericmethod`
 
 Rejects method-local type parameters introduced in Go 1.27, in both method
-declarations and uses. Generic functions and methods that only use their
-receiver type's parameters remain allowed.
+declarations and uses. Generic functions remain allowed, as do methods that use
+only their receiver type's parameters.
 
 ```go
 func (box Box[T]) Map[U any](convert func(T) U) U { // rejected

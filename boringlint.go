@@ -63,10 +63,11 @@ func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 		}
 		reportIteratorTypes(pass, node.Type)
 	case *ast.TypeSpec:
-		if node.TypeParams != nil {
-			reportIteratorTypes(pass, node.TypeParams)
+		if node.TypeParams == nil {
+			reportIteratorTypes(pass, node.Type)
+		} else {
+			reportIteratorTypes(pass, node.TypeParams, node.Type)
 		}
-		reportIteratorTypes(pass, node.Type)
 		return false
 	case *ast.RangeStmt:
 		typ := pass.TypesInfo.TypeOf(node.X)
@@ -83,20 +84,103 @@ func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 	return true
 }
 
-func reportIteratorTypes(pass *analysis.Pass, root ast.Node) {
-	ast.Inspect(root, func(node ast.Node) bool {
-		if field, ok := node.(*ast.Field); ok {
-			reportIteratorTypes(pass, field.Type)
-			return false
-		}
+type iteratorConstraint struct {
+	position   token.Pos
+	typeParams []*types.TypeParam
+}
 
-		expr, ok := node.(ast.Expr)
-		if !ok {
+type iteratorTypeReporter struct {
+	pass               *analysis.Pass
+	pendingConstraints []iteratorConstraint
+	reportedTypeParams map[*types.TypeParam]bool
+}
+
+func reportIteratorTypes(pass *analysis.Pass, roots ...ast.Node) {
+	reporter := iteratorTypeReporter{
+		pass:               pass,
+		reportedTypeParams: make(map[*types.TypeParam]bool),
+	}
+	for _, root := range roots {
+		reporter.walk(root)
+	}
+	reporter.reportPendingConstraints()
+}
+
+func (reporter *iteratorTypeReporter) walk(root ast.Node) bool {
+	reported := false
+	ast.Inspect(root, func(node ast.Node) bool {
+		switch node := node.(type) {
+		case *ast.Field:
+			reported = reporter.walkField(node) || reported
+			return false
+		case ast.Expr:
+			if reporter.reportExpression(node) {
+				reported = true
+				return false
+			}
+		}
+		return true
+	})
+	return reported
+}
+
+func (reporter *iteratorTypeReporter) walkField(field *ast.Field) bool {
+	if reporter.walk(field.Type) {
+		return true
+	}
+
+	var constraint iteratorConstraint
+	for _, name := range field.Names {
+		object := reporter.pass.TypesInfo.Defs[name]
+		if object == nil {
+			continue
+		}
+		typeParam, ok := object.Type().(*types.TypeParam)
+		if !ok || !isIteratorType(typeParam) {
+			continue
+		}
+		if constraint.position == token.NoPos {
+			constraint.position = name.Pos()
+		}
+		constraint.typeParams = append(constraint.typeParams, typeParam)
+	}
+	if len(constraint.typeParams) == 0 {
+		return false
+	}
+
+	// Named interface constraints expose their iterator shape only through
+	// go/types, so defer the fallback until the rest of the declaration is scanned.
+	reporter.pendingConstraints = append(reporter.pendingConstraints, constraint)
+	return false
+}
+
+func (reporter *iteratorTypeReporter) reportExpression(expr ast.Expr) bool {
+	typ := reporter.pass.TypesInfo.TypeOf(expr)
+	if !reportIteratorType(reporter.pass, expr.Pos(), typ) {
+		return false
+	}
+	if typeParam, ok := types.Unalias(typ).(*types.TypeParam); ok {
+		reporter.reportedTypeParams[typeParam] = true
+	}
+	return true
+}
+
+func (reporter *iteratorTypeReporter) reportPendingConstraints() {
+	for _, constraint := range reporter.pendingConstraints {
+		if reporter.typeParamWasReported(constraint.typeParams) {
+			continue
+		}
+		reportIteratorType(reporter.pass, constraint.position, constraint.typeParams[0])
+	}
+}
+
+func (reporter *iteratorTypeReporter) typeParamWasReported(typeParams []*types.TypeParam) bool {
+	for _, typeParam := range typeParams {
+		if reporter.reportedTypeParams[typeParam] {
 			return true
 		}
-		typ := pass.TypesInfo.TypeOf(expr)
-		return !reportIteratorType(pass, expr.Pos(), typ)
-	})
+	}
+	return false
 }
 
 func reportIteratorType(pass *analysis.Pass, position token.Pos, typ types.Type) bool {
@@ -281,7 +365,7 @@ func hasMethodTypeParameters(object types.Object) bool {
 	if !ok {
 		return false
 	}
-	signature, ok := method.Type().(*types.Signature)
-	return ok && signature.Recv() != nil &&
-		signature.TypeParams() != nil && signature.TypeParams().Len() > 0
+	signature := method.Signature()
+	return signature.Recv() != nil &&
+		signature.TypeParams().Len() > 0
 }

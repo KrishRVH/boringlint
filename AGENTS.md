@@ -9,7 +9,7 @@ direct AST/type analysis, precise diagnostics, and a tiny public API. Do not add
 configuration, compatibility fallbacks, dependencies, or abstractions without
 a demonstrated need.
 
-The analyzer must remain deterministic, safe for concurrent package analysis,
+The analyzers must remain deterministic, safe for concurrent package analysis,
 and usable both as a standalone `multichecker` command and through
 `go vet -vettool`.
 
