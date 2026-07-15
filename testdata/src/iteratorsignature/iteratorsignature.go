@@ -74,11 +74,17 @@ type NoResultYieldSequence func(func(int))
 
 type TwoResultYieldSequence func(func(int) (bool, error))
 
+// Iterator-shaped types in variable declarations and function literals are
+// intentionally allowed.
 var IteratorValue = func(yield func(int) bool) {
 	_ = yield
 }
 
 var ExplicitIteratorValue func(func(int) bool)
+
+var ConsumeLiteral = func(sequence func(func(int) bool)) {
+	_ = sequence
+}
 
 func Apply(predicate func(int) bool) bool {
 	return predicate(1)

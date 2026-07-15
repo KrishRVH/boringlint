@@ -121,9 +121,10 @@ values := slices.Collect(dependency.Values())
 ```
 
 The rule intentionally governs imports, range statements, and iterator-shaped
-types in project type, function, and method declarations. Variable declarations
-remain allowed; the rule does not attempt an expression-level ban on every value
-whose type happens to be iterator-shaped.
+types in project type, function, and method declarations. Iterator-shaped types
+in variable declarations and function-literal signatures remain allowed; the
+rule does not attempt an expression-level ban on every value whose type happens
+to be iterator-shaped.
 
 #### Why
 
@@ -132,8 +133,9 @@ producer advances the sequence by invoking a caller-provided `yield` function.
 Range-over-function presents that callback as ordinary loop syntax;
 [`iter.Pull`](https://pkg.go.dev/iter#Pull) recovers caller-driven advancement
 with `next`, but callers that abandon the sequence must invoke `stop`.
-Materializing dependency iterators at the boundary keeps that protocol out of
-project declarations and restores ordinary range over concrete collections.
+Materializing dependency iterators at the boundary keeps iterator-shaped types
+out of project type, function, and method declarations and restores ordinary
+range over concrete collections.
 
 ### `nogenericmethod`
 
