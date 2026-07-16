@@ -25,7 +25,7 @@ type seqOrSlice interface {
 }
 
 type onlySeq interface {
-	seqOrSlice
+	seqOrSlice            // want `contains an iterator-shaped term`
 	~func(func(int) bool) // want `iterator-shaped type`
 }
 

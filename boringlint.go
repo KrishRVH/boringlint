@@ -84,19 +84,18 @@ func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 
 func reportIteratorTypeSpec(pass *analysis.Pass, node *ast.TypeSpec) {
 	if node.TypeParams == nil {
-		if !reportIteratorTypes(pass, node.Type) {
-			reportIteratorTypeTerms(pass, node.Type)
-		}
+		covered := reportIteratorTypes(pass, node.Type)
+		reportIteratorTypeTerms(pass, covered, node.Type)
 		return
 	}
 
-	if !reportIteratorTypes(pass, node.TypeParams, node.Type) {
-		reportIteratorTypeTerms(pass, node.TypeParams, node.Type)
-	}
+	covered := reportIteratorTypes(pass, node.TypeParams, node.Type)
+	reportIteratorTypeTerms(pass, covered, node.TypeParams, node.Type)
 }
 
 type iteratorConstraint struct {
 	position   token.Pos
+	root       ast.Expr
 	typeParams []*types.TypeParam
 }
 
@@ -104,18 +103,22 @@ type iteratorTypeReporter struct {
 	pass               *analysis.Pass
 	pendingConstraints []iteratorConstraint
 	reportedTypeParams map[*types.TypeParam]bool
+	coveredTypeTerms   map[ast.Expr]bool
 }
 
-func reportIteratorTypes(pass *analysis.Pass, roots ...ast.Node) bool {
+// reportIteratorTypes scans every root before resolving pending constraints and
+// returns expressions already covered by either diagnostic path.
+func reportIteratorTypes(pass *analysis.Pass, roots ...ast.Node) map[ast.Expr]bool {
 	reporter := iteratorTypeReporter{
 		pass:               pass,
 		reportedTypeParams: make(map[*types.TypeParam]bool),
+		coveredTypeTerms:   make(map[ast.Expr]bool),
 	}
-	reported := false
 	for _, root := range roots {
-		reported = reporter.walk(root) || reported
+		reporter.walk(root)
 	}
-	return reporter.reportPendingConstraints() || reported
+	reporter.reportPendingConstraints()
+	return reporter.coveredTypeTerms
 }
 
 func (reporter *iteratorTypeReporter) walk(root ast.Node) bool {
@@ -141,7 +144,7 @@ func (reporter *iteratorTypeReporter) walkField(field *ast.Field) bool {
 		return true
 	}
 
-	var constraint iteratorConstraint
+	constraint := iteratorConstraint{root: field.Type}
 	for _, name := range field.Names {
 		object := reporter.pass.TypesInfo.Defs[name]
 		if object == nil {
@@ -174,18 +177,18 @@ func (reporter *iteratorTypeReporter) reportExpression(expr ast.Expr) bool {
 	if typeParam, ok := types.Unalias(typ).(*types.TypeParam); ok {
 		reporter.reportedTypeParams[typeParam] = true
 	}
+	reporter.coveredTypeTerms[expr] = true
 	return true
 }
 
-func (reporter *iteratorTypeReporter) reportPendingConstraints() bool {
-	reported := false
+func (reporter *iteratorTypeReporter) reportPendingConstraints() {
 	for _, constraint := range reporter.pendingConstraints {
+		reporter.coveredTypeTerms[constraint.root] = true
 		if reporter.typeParamWasReported(constraint.typeParams) {
 			continue
 		}
-		reported = reportIteratorType(reporter.pass, constraint.position, constraint.typeParams[0]) || reported
+		reportIteratorType(reporter.pass, constraint.position, constraint.typeParams[0])
 	}
-	return reported
 }
 
 func (reporter *iteratorTypeReporter) typeParamWasReported(typeParams []*types.TypeParam) bool {
@@ -210,27 +213,18 @@ func reportIteratorType(pass *analysis.Pass, position token.Pos, typ types.Type)
 	return true
 }
 
-func reportIteratorTypeTerms(pass *analysis.Pass, roots ...ast.Node) {
+func reportIteratorTypeTerms(pass *analysis.Pass, covered map[ast.Expr]bool, roots ...ast.Node) {
 	for _, root := range roots {
 		ast.Inspect(root, func(node ast.Node) bool {
 			expr, ok := node.(ast.Expr)
 			if !ok {
 				return true
 			}
-			switch expr.(type) {
-			case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr, *ast.IndexListExpr:
-			default:
-				return true
+			if covered[expr] {
+				return false
 			}
-
-			typ := pass.TypesInfo.TypeOf(expr)
-			switch typ.(type) {
-			case *types.Alias, *types.Named:
-			default:
-				return true
-			}
-
-			if !hasAcceptedSignature(typ, nil, isIteratorSignature, make(map[types.Type]bool)) {
+			typ := iteratorTermType(pass, expr)
+			if typ == nil {
 				return true
 			}
 
@@ -242,6 +236,30 @@ func reportIteratorTypeTerms(pass *analysis.Pass, roots ...ast.Node) {
 			return false
 		})
 	}
+}
+
+func iteratorTermType(pass *analysis.Pass, expr ast.Expr) types.Type {
+	switch expr := expr.(type) {
+	case *ast.Ident:
+		if _, ok := pass.TypesInfo.Uses[expr].(*types.TypeName); !ok {
+			return nil
+		}
+	case *ast.SelectorExpr, *ast.IndexExpr, *ast.IndexListExpr:
+	default:
+		return nil
+	}
+
+	typ := pass.TypesInfo.TypeOf(expr)
+	switch typ.(type) {
+	case *types.Alias, *types.Named:
+	default:
+		return nil
+	}
+
+	if !hasAcceptedSignature(typ, nil, isIteratorSignature, make(map[types.Type]bool)) {
+		return nil
+	}
+	return typ
 }
 
 func isIteratorType(typ types.Type) bool {

@@ -23,6 +23,20 @@ type GenericSequenceHolder[T iteratorprovider.HeterogeneousSequence] struct { //
 	Value T
 }
 
+type MixedConstraintPair[
+	T ~func(func(int) bool), // want `iterator-shaped type`
+	U iteratorprovider.HeterogeneousSequence, // want `contains an iterator-shaped term`
+] struct{}
+
+type NamedSequenceHolder[T iteratorprovider.Sequence[int]] struct {
+	Value T // want `iterator-shaped type`
+}
+
+type CombinedConstraint[T interface {
+	~func(func(int) bool)                  // want `iterator-shaped type`
+	iteratorprovider.HeterogeneousSequence // want `contains an iterator-shaped term`
+}] struct{}
+
 type PredicateAlias = iteratorprovider.Predicate
 
 type MethodsAlias = iteratorprovider.Methods

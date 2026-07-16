@@ -5,6 +5,10 @@
 `boringlint` enforces a deliberately restricted Go dialect: direct data and
 control flow over language machinery that hides either one.
 
+Its policy is inspired by ThePrimeagen's
+[*I am done with Golang*](https://youtu.be/WqSWZuGS9pc): keep Go procedural,
+make control flow and costs visible, and keep codebases familiar.
+
 This is opinionated policy, not a claim that the rejected features are invalid
 Go. The module is pre-v1 while the rules and public analyzer API settle.
 
