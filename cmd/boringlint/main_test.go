@@ -5,8 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
+
+const vetSubcommand = "vet"
 
 func TestCommand(t *testing.T) {
 	t.Parallel()
@@ -22,6 +26,14 @@ func TestCommand(t *testing.T) {
 			t.Errorf("help output does not contain %q:\n%s", analyzer, output)
 		}
 	}
+	command = exec.CommandContext(t.Context(), binary, "help", "nogenericmethod") // #nosec G204 -- binary is built by this test.
+	output, err = command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("show nogenericmethod help: %v\n%s", err, output)
+	}
+	if !bytes.Contains(output, []byte("Go 1.27 or newer")) {
+		t.Errorf("nogenericmethod help omits the driver requirement:\n%s", output)
+	}
 
 	testCommandModes(
 		t,
@@ -29,6 +41,12 @@ func TestCommand(t *testing.T) {
 		filepath.Join("..", ".."),
 		".",
 		"./testdata/integration",
+		[]string{
+			"testdata/integration/integration.go:3:8: import of iter is forbidden by boringlint; accept dependency iterators without naming their type and materialize them at the boundary",
+			"testdata/integration/integration.go:5:6: iterator-shaped type func(yield func(int) bool) is forbidden by boringlint; materialize dependency iterators at the call boundary",
+			"testdata/integration/integration.go:9:17: iterator-shaped type iter.Seq[int] is forbidden by boringlint; materialize dependency iterators at the call boundary",
+			"testdata/integration/integration.go:14:15: range over a function value (iter.Seq[int]) is forbidden by boringlint; iterate concrete data or materialize at the dependency boundary",
+		},
 	)
 }
 
@@ -90,10 +108,94 @@ func use() {
 				directory,
 				"./clean",
 				"./diagnostic",
-				"constraint example.com/target/dependency.Sequence[int] contains an iterator-shaped term",
+				[]string{
+					"diagnostic/diagnostic.go:5:2: import of iter is forbidden by boringlint; accept dependency iterators without naming their type and materialize them at the boundary",
+					"diagnostic/diagnostic.go:8:22: constraint example.com/target/dependency.Sequence[int] contains an iterator-shaped term, which is forbidden by boringlint; materialize dependency iterators at the call boundary",
+					"diagnostic/diagnostic.go:10:6: iterator-shaped type func(yield func(int) bool) is forbidden by boringlint; materialize dependency iterators at the call boundary",
+					"diagnostic/diagnostic.go:14:17: iterator-shaped type iter.Seq[int] is forbidden by boringlint; materialize dependency iterators at the call boundary",
+					"diagnostic/diagnostic.go:19:6: range over a function value (iter.Seq[int]) is forbidden by boringlint; iterate concrete data or materialize at the dependency boundary",
+				},
 			)
 		})
 	}
+}
+
+func TestCommandRejectsHeterogeneousIteratorConstraint(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	writeTestFile(t, filepath.Join(directory, "go.mod"), "module example.com/heterogeneous\n\ngo 1.25\n")
+	writeTestFile(t, filepath.Join(directory, "dependency", "dependency.go"), `package dependency
+
+type Sequence interface {
+	~func(func(int) bool) | ~func(func(string) bool)
+}
+`)
+	writeTestFile(t, filepath.Join(directory, "project", "project.go"), `package project
+
+import "example.com/heterogeneous/dependency"
+
+func Use[T dependency.Sequence]() {}
+`)
+	writeTestFile(t, filepath.Join(directory, "clean", "clean.go"), `package clean
+
+func Values() []int { return []int{1, 2, 3} }
+`)
+
+	testCommandModes(
+		t,
+		buildCommand(t),
+		directory,
+		"./clean",
+		"./project",
+		[]string{
+			"project/project.go:5:10: iterator-shaped type T is forbidden by boringlint; materialize dependency iterators at the call boundary",
+		},
+	)
+}
+
+func TestCommandReportsEachHiddenConstraintTerm(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	writeTestFile(t, filepath.Join(directory, "go.mod"), "module example.com/hiddenterms\n\ngo 1.25\n")
+	writeTestFile(t, filepath.Join(directory, "dependency", "dependency.go"), `package dependency
+
+type SequenceOrSlice interface {
+	~func(func(int) bool) | ~[]int
+}
+
+type SequenceOrMap interface {
+	~func(func(int) bool) | ~map[int]int
+}
+`)
+	writeTestFile(t, filepath.Join(directory, "project", "project.go"), `package project
+
+import "example.com/hiddenterms/dependency"
+
+type Pair[T interface {
+	dependency.SequenceOrSlice
+	dependency.SequenceOrMap
+}] struct {
+	Value T
+}
+`)
+	writeTestFile(t, filepath.Join(directory, "clean", "clean.go"), `package clean
+
+func Values() []int { return []int{1, 2, 3} }
+`)
+
+	testCommandModes(
+		t,
+		buildCommand(t),
+		directory,
+		"./clean",
+		"./project",
+		[]string{
+			"project/project.go:6:2: constraint example.com/hiddenterms/dependency.SequenceOrSlice contains an iterator-shaped term, which is forbidden by boringlint; materialize dependency iterators at the call boundary",
+			"project/project.go:7:2: constraint example.com/hiddenterms/dependency.SequenceOrMap contains an iterator-shaped term, which is forbidden by boringlint; materialize dependency iterators at the call boundary",
+		},
+	)
 }
 
 func testCommandModes(
@@ -102,7 +204,7 @@ func testCommandModes(
 	directory string,
 	cleanTarget string,
 	diagnosticTarget string,
-	extraDiagnostics ...string,
+	want []string,
 ) {
 	t.Helper()
 
@@ -121,23 +223,20 @@ func testCommandModes(
 		{
 			name:                "vettool",
 			executable:          "go",
-			diagnosticArguments: []string{"vet", "-vettool=" + binary, diagnosticTarget},
-			cleanArguments:      []string{"vet", "-vettool=" + binary, cleanTarget},
+			diagnosticArguments: []string{vetSubcommand, "-vettool=" + binary, diagnosticTarget},
+			cleanArguments:      []string{vetSubcommand, "-vettool=" + binary, cleanTarget},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			diagnostics := append(
-				[]string{"import of iter is forbidden", "range over a function value"},
-				extraDiagnostics...,
-			)
 			assertDiagnostics(
 				t,
 				directory,
 				test.executable,
 				test.diagnosticArguments,
-				diagnostics...,
+				nil,
+				want,
 			)
 			assertSuccess(t, directory, test.executable, test.cleanArguments)
 		})
@@ -160,21 +259,74 @@ func assertDiagnostics(
 	directory string,
 	executable string,
 	arguments []string,
-	want ...string,
+	environment []string,
+	want []string,
 ) {
 	t.Helper()
 
 	command := exec.CommandContext(t.Context(), executable, arguments...) // #nosec G204 -- all arguments are test-controlled.
 	command.Dir = directory
+	if environment != nil {
+		command.Env = environment
+	}
 	output, err := command.CombinedOutput()
 	if err == nil {
 		t.Fatalf("command succeeded; want diagnostics:\n%s", output)
 	}
-	for _, diagnostic := range want {
-		if !bytes.Contains(output, []byte(diagnostic)) {
-			t.Errorf("output does not contain %q:\n%s", diagnostic, output)
+	got := diagnosticLines(output, directory)
+	slices.Sort(got)
+	want = slices.Clone(want)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("diagnostics =\n%s\nwant =\n%s\nraw output:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"), output)
+	}
+}
+
+func assertDiagnosticAlternatives(
+	t *testing.T,
+	directory string,
+	executable string,
+	arguments []string,
+	environment []string,
+	want [][]string,
+) {
+	t.Helper()
+
+	command := exec.CommandContext(t.Context(), executable, arguments...) // #nosec G204 -- all arguments are test-controlled.
+	command.Dir = directory
+	command.Env = environment
+	output, err := command.CombinedOutput()
+	if err == nil {
+		t.Fatalf("command succeeded; want diagnostics:\n%s", output)
+	}
+	got := diagnosticLines(output, directory)
+	slices.Sort(got)
+	for _, alternative := range want {
+		alternative = slices.Clone(alternative)
+		slices.Sort(alternative)
+		if slices.Equal(got, alternative) {
+			return
 		}
 	}
+	t.Errorf("diagnostics =\n%s\nwant one of =\n%v\nraw output:\n%s", strings.Join(got, "\n"), want, output)
+}
+
+func diagnosticLines(output []byte, directory string) []string {
+	absoluteDirectory, err := filepath.Abs(directory)
+	if err != nil {
+		absoluteDirectory = directory
+	}
+	prefix := filepath.ToSlash(absoluteDirectory) + "/"
+	var diagnostics []string
+	for line := range strings.Lines(string(output)) {
+		line = filepath.ToSlash(strings.TrimSpace(line))
+		if line == "" || strings.HasPrefix(line, "# ") {
+			continue
+		}
+		line = strings.TrimPrefix(line, prefix)
+		diagnostics = append(diagnostics, line)
+	}
+	return diagnostics
 }
 
 func assertSuccess(t *testing.T, directory string, executable string, arguments []string) {

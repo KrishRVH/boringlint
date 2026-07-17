@@ -44,17 +44,23 @@ func use(box dependency.Box[int], local Box[int]) {
 		directory,
 		binary,
 		[]string{"./project"},
-		"declares method-local type parameters",
-		"use of generic method Map",
-		"use of generic method LocalMap",
+		nil,
+		[]string{
+			"project/genericmethod.go:7:15: generic method LocalMap declares method-local type parameters, which are forbidden by boringlint; use a package-level generic function",
+			"project/genericmethod.go:13:10: use of generic method Map is forbidden by boringlint; use a package-level generic function",
+			"project/genericmethod.go:14:12: use of generic method LocalMap is forbidden by boringlint; use a package-level generic function",
+		},
 	)
 	assertDiagnostics(
 		t,
 		directory,
 		"go",
-		[]string{"vet", "-vettool=" + binary, "./project"},
-		"declares method-local type parameters",
-		"use of generic method Map",
-		"use of generic method LocalMap",
+		[]string{vetSubcommand, "-vettool=" + binary, "./project"},
+		nil,
+		[]string{
+			"project/genericmethod.go:7:15: generic method LocalMap declares method-local type parameters, which are forbidden by boringlint; use a package-level generic function",
+			"project/genericmethod.go:13:10: use of generic method Map is forbidden by boringlint; use a package-level generic function",
+			"project/genericmethod.go:14:12: use of generic method LocalMap is forbidden by boringlint; use a package-level generic function",
+		},
 	)
 }

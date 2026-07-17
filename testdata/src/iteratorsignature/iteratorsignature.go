@@ -28,6 +28,16 @@ type Holder struct {
 	Values Sequence // want `iterator-shaped type`
 }
 
+type NestedIteratorField struct {
+	Values func(func(Sequence) bool) // want `iterator-shaped type` `iterator-shaped type`
+}
+
+type NamedIterator Sequence // want `iterator-shaped type`
+
+type InstantiatedIterator GenericSequence[int] // want `iterator-shaped type`
+
+type NestedIteratorArgument GenericSequence[Sequence] // want `iterator-shaped type` `iterator-shaped type`
+
 type Source interface {
 	Values() Sequence // want `iterator-shaped type`
 }

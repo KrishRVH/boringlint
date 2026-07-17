@@ -10,12 +10,14 @@ Its policy is inspired by ThePrimeagen's
 make control flow and costs visible, and keep codebases familiar.
 
 This is opinionated policy, not a claim that the rejected features are invalid
-Go. The module is pre-v1 while the rules and public analyzer API settle.
+Go. v0.9.0 is the release candidate for the v1 rule scope and public analyzer
+API. v1.0 will follow external review and a passing compatibility gate on the
+stable Go 1.27 toolchain.
 
 ## Install and run
 
-Install the command with the same or a newer Go toolchain than the code it will
-analyze:
+Install the command with Go 1.25 or newer, using a toolchain at least as new as
+the code it will analyze:
 
 ```sh
 go install github.com/KrishRVH/boringlint/cmd/boringlint@latest
@@ -69,6 +71,10 @@ source it analyzes.
 GOTOOLCHAIN=go1.27rc2 go install github.com/KrishRVH/boringlint/cmd/boringlint@latest
 ```
 
+Go 1.27 is still a release candidate. v0.9.0 validates its current syntax and
+tooling behavior, but v1.0 will not claim stable Go 1.27 support until the final
+toolchain passes the same compatibility gate.
+
 The Go 1.25 tool floor is deliberate. Analysis drivers consume
 [compiler export data](https://github.com/golang/tools/blob/v0.48.0/go/gcexportdata/gcexportdata.go#L5-L23)
 and implement the [`go vet -vettool` protocol](https://github.com/golang/tools/blob/v0.48.0/go/analysis/unitchecker/unitchecker.go#L82-L96),
@@ -96,9 +102,14 @@ Rejects:
 - direct imports of `iter`;
 - Go 1.23 range-over-function;
 - iterator-shaped types in project type, function, and method declarations,
-  including constraints, fields, parameters, and results;
+  including constraints, fields, parameters, and results, even when the
+  admitted iterator types have different valid yield signatures;
 - project type declarations that name constraints containing iterator-shaped
   terms, including mixed unions and intersections that eliminate those terms.
+
+Each independently named hidden constraint term is reported at that term. A
+whole type-parameter diagnostic does not replace diagnostics for distinct
+named terms inside its constraint.
 
 ```go
 import "iter" // rejected
@@ -197,6 +208,24 @@ mise run standards:check
 The full gate checks formatting, module integrity, static analysis,
 vulnerabilities, secrets, race behavior, command integration, Go 1.25
 compatibility, and Go 1.27 behavior.
+
+### Release
+
+Release only an exact commit that has passed both the local and remote gates:
+
+1. Review the pinned mise tools and CI mise runtime. If a tool pin changes, run
+   `mise run lock`; never edit the lockfile by hand.
+2. Run `mise run standards:check`, review the complete diff, and commit with a
+   Conventional Commit.
+3. Confirm `git status --short` is empty, push the commit, and wait for CI to
+   pass on that exact SHA.
+4. Create the annotated tag from the exact SHA that passed CI with
+   `git tag -a -m vX.Y.Z vX.Y.Z <verified-SHA>`, then run
+   `git push origin vX.Y.Z`.
+5. Publish the GitHub Release from that tag, for example with
+   `gh release create vX.Y.Z --verify-tag --generate-notes`.
+
+Do not publish the tag or release while its commit's CI run is still pending.
 
 ## License
 
