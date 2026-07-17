@@ -118,6 +118,11 @@ func consumeEmptyBool[B iteratorprovider.EmptyBool](sequence func(func(int) B)) 
 	_ = sequence
 }
 
+func declareFieldCollisionNarrowed[S iteratorprovider.FieldCollisionNarrowed]() { // want `iterator-shaped type`
+}
+
+var _ = declareFieldCollisionNarrowed[iteratorprovider.FieldCollisionSequence]
+
 type HeterogeneousYieldSequence[Y iteratorprovider.HeterogeneousYield] func(Y) // want `iterator-shaped type`
 
 type ExactBoolSequence[B bool] func(func(int) B) // want `iterator-shaped type`

@@ -40,8 +40,8 @@ type Missed = dependency.MixedAlias
 		executable string
 		arguments  []string
 	}{
-		{name: "standalone", executable: binary, arguments: []string{"./project"}},
-		{name: "vettool", executable: "go", arguments: []string{vetSubcommand, "-vettool=" + binary, "./project"}},
+		{name: standaloneMode, executable: binary, arguments: []string{"./project"}},
+		{name: vettoolMode, executable: "go", arguments: []string{vetSubcommand, "-vettool=" + binary, "./project"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			assertDiagnosticAlternatives(

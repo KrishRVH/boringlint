@@ -10,7 +10,11 @@ import (
 	"testing"
 )
 
-const vetSubcommand = "vet"
+const (
+	standaloneMode = "standalone"
+	vettoolMode    = "vettool"
+	vetSubcommand  = "vet"
+)
 
 func TestCommand(t *testing.T) {
 	t.Parallel()
@@ -35,19 +39,29 @@ func TestCommand(t *testing.T) {
 		t.Errorf("nogenericmethod help omits the driver requirement:\n%s", output)
 	}
 
+	want := []string{
+		"testdata/integration/integration.go:3:8: import of iter is forbidden by boringlint; accept dependency iterators without naming their type and materialize them at the boundary",
+		"testdata/integration/integration.go:5:6: iterator-shaped type func(yield func(int) bool) is forbidden by boringlint; materialize dependency iterators at the call boundary",
+		"testdata/integration/integration.go:9:17: iterator-shaped type iter.Seq[int] is forbidden by boringlint; materialize dependency iterators at the call boundary",
+		"testdata/integration/integration.go:14:15: range over a function value (iter.Seq[int]) is forbidden by boringlint; iterate concrete data or materialize at the dependency boundary",
+	}
 	testCommandModes(
 		t,
 		binary,
 		filepath.Join("..", ".."),
 		".",
 		"./testdata/integration",
-		[]string{
-			"testdata/integration/integration.go:3:8: import of iter is forbidden by boringlint; accept dependency iterators without naming their type and materialize them at the boundary",
-			"testdata/integration/integration.go:5:6: iterator-shaped type func(yield func(int) bool) is forbidden by boringlint; materialize dependency iterators at the call boundary",
-			"testdata/integration/integration.go:9:17: iterator-shaped type iter.Seq[int] is forbidden by boringlint; materialize dependency iterators at the call boundary",
-			"testdata/integration/integration.go:14:15: range over a function value (iter.Seq[int]) is forbidden by boringlint; iterate concrete data or materialize at the dependency boundary",
-		},
+		want,
 	)
+	t.Run("selection", func(t *testing.T) {
+		testAnalyzerSelectionModes(
+			t,
+			binary,
+			filepath.Join("..", ".."),
+			"./testdata/integration",
+			want,
+		)
+	})
 }
 
 func TestCommandTargetGoVersions(t *testing.T) {
@@ -215,13 +229,13 @@ func testCommandModes(
 		cleanArguments      []string
 	}{
 		{
-			name:                "standalone",
+			name:                standaloneMode,
 			executable:          binary,
 			diagnosticArguments: []string{diagnosticTarget},
 			cleanArguments:      []string{cleanTarget},
 		},
 		{
-			name:                "vettool",
+			name:                vettoolMode,
 			executable:          "go",
 			diagnosticArguments: []string{vetSubcommand, "-vettool=" + binary, diagnosticTarget},
 			cleanArguments:      []string{vetSubcommand, "-vettool=" + binary, cleanTarget},
@@ -239,6 +253,45 @@ func testCommandModes(
 				want,
 			)
 			assertSuccess(t, directory, test.executable, test.cleanArguments)
+		})
+	}
+}
+
+func testAnalyzerSelectionModes(
+	t *testing.T,
+	binary string,
+	directory string,
+	target string,
+	want []string,
+) {
+	t.Helper()
+
+	tests := []struct {
+		name          string
+		executable    string
+		baseArguments []string
+	}{
+		{
+			name:       standaloneMode,
+			executable: binary,
+		},
+		{
+			name:       vettoolMode,
+			executable: "go",
+			baseArguments: []string{
+				vetSubcommand,
+				"-vettool=" + binary,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			noIteratorArguments := append(slices.Clone(test.baseArguments), "-noiterator", target)
+			assertDiagnostics(t, directory, test.executable, noIteratorArguments, nil, want)
+
+			noGenericMethodArguments := append(slices.Clone(test.baseArguments), "-nogenericmethod", target)
+			assertSuccess(t, directory, test.executable, noGenericMethodArguments)
 		})
 	}
 }

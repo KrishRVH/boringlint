@@ -10,9 +10,9 @@ Its policy is inspired by ThePrimeagen's
 make control flow and costs visible, and keep codebases familiar.
 
 This is opinionated policy, not a claim that the rejected features are invalid
-Go. v0.9.0 is the release candidate for the v1 rule scope and public analyzer
-API. v1.0 will follow external review and a passing compatibility gate on the
-stable Go 1.27 toolchain.
+Go. v0.9.5 is the final release candidate for the v1 rule scope and public
+analyzer API ahead of the stable Go 1.27 release. A v1.0 release remains
+contingent on a passing compatibility gate on the stable Go 1.27 toolchain.
 
 ## Install and run
 
@@ -71,7 +71,7 @@ source it analyzes.
 GOTOOLCHAIN=go1.27rc2 go install github.com/KrishRVH/boringlint/cmd/boringlint@latest
 ```
 
-Go 1.27 is still a release candidate. v0.9.0 validates its current syntax and
+Go 1.27 is still a release candidate. v0.9.5 validates its current syntax and
 tooling behavior, but v1.0 will not claim stable Go 1.27 support until the final
 toolchain passes the same compatibility gate.
 

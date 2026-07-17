@@ -621,6 +621,20 @@ func newMethodWitness(
 			),
 		))
 	}
+
+	return validatedMethodWitness(witness, constraint)
+}
+
+func validatedMethodWitness(witness *types.Named, constraint *types.Interface) types.Type {
+	// Named.AddMethod permits synthetic field/method collisions that Go source
+	// does not. The computed method set filters those impossible witnesses.
+	methodSet := types.NewMethodSet(witness)
+	for index := range constraint.NumMethods() {
+		method := constraint.Method(index)
+		if methodSet.Lookup(method.Pkg(), method.Name()) == nil {
+			return nil
+		}
+	}
 	return witness
 }
 

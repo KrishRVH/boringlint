@@ -42,6 +42,10 @@ type Source interface {
 	Values() Sequence // want `iterator-shaped type`
 }
 
+type Materializer interface {
+	Iterate(func(int) bool) // want `iterator-shaped type`
+}
+
 func Values() Sequence { // want `iterator-shaped type`
 	return nil
 }

@@ -44,6 +44,15 @@ type EmptyBool interface {
 	missing()
 }
 
+type FieldCollisionSequence func(func(int) bool)
+
+func (FieldCollisionSequence) Keep() {}
+
+type FieldCollisionNarrowed interface {
+	~func(func(int) bool) | ~struct{ Keep bool }
+	Keep()
+}
+
 type SequenceOrSlice interface {
 	~func(func(int) bool) | ~[]int
 }
