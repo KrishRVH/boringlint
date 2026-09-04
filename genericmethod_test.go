@@ -1,5 +1,3 @@
-//go:build go1.27
-
 package boringlint
 
 import (
@@ -54,13 +52,34 @@ import "dependency"
 
 func use(box dependency.Box[int]) {
 	_ = box.Map[string](func(int) string { return "" }) // want "use of generic method Map"
-	_ = box.Map(func(int) string { return "" })         // want "use of generic method Map"
-	methodValue := box.Map[string]                       // want "use of generic method Map"
+	_ = box.Map(func(int) string { return "" })        // want "use of generic method Map"
+	methodValue := box.Map[string]                     // want "use of generic method Map"
 	_ = methodValue
 	methodExpression := dependency.Box[int].Map[string] // want "use of generic method Map"
 	_ = methodExpression
 	var wrapper dependency.Wrapper[int]
 	_ = wrapper.Map[string] // want "use of generic method Map"
+	_ = []func(func(int) string) string{box.Map} // want "use of generic method Map"
+	_ = func(func(int) string) string(box.Map) // want "use of generic method Map"
+}
+
+func methodValue(box dependency.Box[int]) func(func(int) string) string {
+	return box.Map // want "use of generic method Map"
+}
+`,
+		"stdlib/stdlib.go": `package stdlib
+
+import "math/rand/v2"
+
+type Random struct{ *rand.Rand }
+
+func use(random *rand.Rand, embedded Random) {
+	_ = random.N(10) // want "use of generic method N"
+	_ = random.N[int64](10) // want "use of generic method N"
+	_ = (*rand.Rand).N[int] // want "use of generic method N"
+	_ = embedded.N[int] // want "use of generic method N"
+	_ = rand.N(10)
+	_ = random.IntN(10)
 }
 `,
 	})
@@ -69,8 +88,36 @@ func use(box dependency.Box[int]) {
 	}
 	t.Cleanup(cleanup)
 
-	results := analysistest.Run(t, testdata, NoGenericMethod, "dependency", "project")
+	results := analysistest.Run(t, testdata, NoGenericMethod, "dependency", "project", "stdlib")
 	assertDiagnosticStartsAt(t, results, "declares method-local type parameters", "Map")
+}
+
+func TestNoIteratorGenericMethods(t *testing.T) {
+	t.Parallel()
+
+	testdata, cleanup, err := analysistest.WriteFiles(map[string]string{
+		"genericiterator/genericiterator.go": `package genericiterator
+
+type Source struct{}
+
+func (Source) Values[T any](yield func(T) bool) {} // want "iterator-shaped type"
+
+func (Source) Consume[S ~func(func(int) bool)](sequence S) {} // want "iterator-shaped type" "iterator-shaped type"
+
+func (Source) Collect[T any](values []T) []T { return values }
+
+func use(source Source) {
+	for range source.Values[int] { // want "range over a function value"
+	}
+}
+`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup)
+
+	analysistest.Run(t, testdata, NoIterator, "genericiterator")
 }
 
 func assertDiagnosticStartsAt(

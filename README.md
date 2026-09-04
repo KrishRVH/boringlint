@@ -10,14 +10,11 @@ Its policy is inspired by ThePrimeagen's
 make control flow and costs visible, and keep codebases familiar.
 
 This is opinionated policy, not a claim that the rejected features are invalid
-Go. v0.9.5 is the final release candidate for the v1 rule scope and public
-analyzer API ahead of the stable Go 1.27 release. A v1.0 release remains
-contingent on a passing compatibility gate on the stable Go 1.27 toolchain.
+Go.
 
 ## Install and run
 
-Install the command with Go 1.25 or newer, using a toolchain at least as new as
-the code it will analyze:
+Install the command with Go 1.27 or newer:
 
 ```sh
 go install github.com/KrishRVH/boringlint/cmd/boringlint@latest
@@ -53,47 +50,29 @@ honors `//nolint:noiterator`; `boringlint` does not ship that adapter.
 
 ## Go version support
 
-`boringlint`'s source-project floor is Go 1.23, which introduced
-[range-over-function and `iter`](https://go.dev/doc/go1.23). New Go releases
-are supported only after both command modes pass the compatibility gate; the
-current upper bound is Go 1.27, tested with the Go 1.27rc2 toolchain. Building,
-installing, or running `boringlint` requires Go 1.25 or newer. Importing its
-analyzers into a custom driver has the same floor because a module's
-[`go` directive is a mandatory minimum](https://go.dev/ref/mod#go-mod-file-go).
-A standalone or vettool binary may analyze projects declaring Go 1.23 or 1.24,
-provided the binary was built with a supported toolchain at least as new as the
-source it analyzes.
+Building, installing, or importing `boringlint` requires Go 1.27.0 or newer.
+Both analyzers run with the same Go 1.27 parser and type checker. Development
+and the release gate use Go 1.27.1; a separate compatibility check runs the
+suite with the minimum Go 1.27.0 toolchain.
 
-`nogenericmethod` analyzes Go 1.27 syntax, so its binary must be built with Go
-1.27 or newer. The repository currently tests that rule with Go 1.27rc2:
+Both command modes support projects declaring Go 1.23 through Go 1.27. Go 1.23
+is the source-project floor because it introduced
+[range-over-function and `iter`](https://go.dev/doc/go1.23). A project's `go`
+directive may be older than the toolchain used to build the analyzer.
 
-```sh
-GOTOOLCHAIN=go1.27rc2 go install github.com/KrishRVH/boringlint/cmd/boringlint@latest
-```
-
-Go 1.27 is still a release candidate. v0.9.5 validates its current syntax and
-tooling behavior, but v1.0 will not claim stable Go 1.27 support until the final
-toolchain passes the same compatibility gate.
-
-The Go 1.25 tool floor is deliberate. Analysis drivers consume
-[compiler export data](https://github.com/golang/tools/blob/v0.48.0/go/gcexportdata/gcexportdata.go#L5-L23)
-and implement the [`go vet -vettool` protocol](https://github.com/golang/tools/blob/v0.48.0/go/analysis/unitchecker/unitchecker.go#L82-L96),
-so ordinary Go source compatibility does not make an old driver
-forward-compatible. [`x/tools` v0.36.0](https://github.com/golang/tools/blob/v0.36.0/go.mod)
-was the last release with a Go 1.23 floor before
-[v0.37.0 raised it](https://github.com/golang/tools/blob/v0.37.0/go.mod), but Go
-[subrepositories generally support only the previous two Go releases and tip](https://go.dev/wiki/X-Repositories).
-Freezing the driver there would trade a lower build floor for unsupported
-compiler integration. The compatible
-[`x/tools` v0.48.0](https://github.com/golang/tools/blob/v0.48.0/go.mod) requires
-Go 1.25.
-
-The floor will rise only when correct support for a newly supported Go release
-requires a newer analysis driver. Each increase must be explicit in `go.mod`
-and this section, and both standalone and vettool compatibility must pass
-before support for that source version is claimed.
+Analysis drivers consume
+[compiler export data](https://github.com/golang/tools/blob/v0.49.0/go/gcexportdata/gcexportdata.go)
+and implement the
+[`go vet -vettool` protocol](https://github.com/golang/tools/blob/v0.49.0/go/analysis/unitchecker/unitchecker.go).
+Use a binary built with a supported toolchain at least as new as the code it
+analyzes. New Go releases are supported only after both command modes pass the
+compatibility gate. Any increase to the build minimum must be explicit in
+`go.mod` and this section.
 
 ## Rules
+
+Go 1.27's promoted-field struct literal keys and generalized function type
+inference remain allowed.
 
 ### `noiterator`
 
@@ -155,8 +134,9 @@ range over concrete collections.
 ### `nogenericmethod`
 
 Rejects method-local type parameters introduced in Go 1.27, in both method
-declarations and uses. Generic functions remain allowed, as do methods that use
-only their receiver type's parameters.
+declarations and uses, including methods from dependencies and the standard
+library. Generic functions remain allowed, as do methods that use only their
+receiver type's parameters.
 
 ```go
 func (box Box[T]) Map[U any](convert func(T) U) U { // rejected
@@ -167,6 +147,10 @@ func Map[T, U any](box Box[T], convert func(T) U) U { // allowed
 	return convert(box.value)
 }
 ```
+
+The same rule applies to [`math/rand/v2`](https://pkg.go.dev/math/rand/v2):
+`random.N(10)` is rejected when `random` is a `*rand.Rand`; the package-level
+`rand.N(10)` and the ordinary method `random.IntN(10)` remain allowed.
 
 #### Why
 
@@ -206,8 +190,9 @@ mise run standards:check
 ```
 
 The full gate checks formatting, module integrity, static analysis,
-vulnerabilities, secrets, race behavior, command integration, Go 1.25
-compatibility, and Go 1.27 behavior.
+vulnerabilities, secrets, race behavior, and command integration. Tests run on
+Go 1.27.0 and Go 1.27.1, with both command modes also analyzing projects that
+declare Go 1.23 through Go 1.27.
 
 ### Release
 

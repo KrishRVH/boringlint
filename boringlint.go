@@ -66,7 +66,6 @@ func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 		reportIteratorTypes(pass, false, node.Type)
 	case *ast.TypeSpec:
 		reportIteratorTypeSpec(pass, node)
-		return false
 	case *ast.RangeStmt:
 		typ := pass.TypesInfo.TypeOf(node.X)
 		if !isRangeFunctionType(typ) {
@@ -133,6 +132,11 @@ func (reporter *iteratorTypeReporter) walk(root ast.Node) bool {
 	reported := false
 	ast.Inspect(root, func(node ast.Node) bool {
 		switch node := node.(type) {
+		case *ast.ArrayType:
+			// Length expressions may contain function literals and local variables.
+			// The outer inspector handles nested declarations and range statements.
+			reported = reporter.walk(node.Elt) || reported
+			return false
 		case *ast.Field:
 			reported = reporter.walkField(node) || reported
 			return false
@@ -270,6 +274,10 @@ func reportIteratorTypeTerms(pass *analysis.Pass, covered map[ast.Expr]bool, roo
 	reported := false
 	for _, root := range roots {
 		ast.Inspect(root, func(node ast.Node) bool {
+			if array, ok := node.(*ast.ArrayType); ok {
+				reported = reportIteratorTypeTerms(pass, covered, array.Elt) || reported
+				return false
+			}
 			expr, ok := node.(ast.Expr)
 			if !ok {
 				return true
@@ -323,8 +331,7 @@ func coverEquivalentTypeExpressions(covered map[ast.Expr]bool, expr ast.Expr) {
 }
 
 func iteratorTermType(pass *analysis.Pass, expr ast.Expr) types.Type {
-	typeName := referencedTypeName(pass, expr)
-	if typeName == nil {
+	if referencedTypeName(pass, expr) == nil {
 		return nil
 	}
 
@@ -332,9 +339,7 @@ func iteratorTermType(pass *analysis.Pass, expr ast.Expr) types.Type {
 	switch typ.(type) {
 	case *types.Alias, *types.Named:
 	default:
-		if !typeName.IsAlias() {
-			return nil
-		}
+		return nil
 	}
 
 	if !hasAcceptedSignature(typ, nil, isIteratorSignature, make(map[types.Type]bool)) {
@@ -697,55 +702,39 @@ var NoGenericMethod = &analysis.Analyzer{
 	Doc: "reject generic method declarations and uses\n\n" +
 		"nogenericmethod reports method declarations with method-local type parameters and " +
 		"selector expressions that resolve to those methods. Methods using only receiver " +
-		"type parameters remain allowed; use a package-level generic function instead. " +
-		"A driver built with Go 1.27 or newer is required to inspect Go 1.27 generic-method syntax.",
+		"type parameters remain allowed; use a package-level generic function instead.",
 	URL:      "https://github.com/KrishRVH/boringlint#nogenericmethod",
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 	Run:      runNoGenericMethod,
 }
 
 func runNoGenericMethod(pass *analysis.Pass) (any, error) {
-	for _, file := range pass.Files {
-		reportGenericMethods(file, func(decl *ast.FuncDecl) {
-			pass.Reportf(
-				decl.Name.Pos(),
-				"generic method %s declares method-local type parameters, which are forbidden by boringlint; use a package-level generic function",
-				decl.Name.Name,
-			)
-		})
-	}
-
 	inspection := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
-	inspection.Preorder([]ast.Node{(*ast.SelectorExpr)(nil)}, func(node ast.Node) {
-		selector := node.(*ast.SelectorExpr)
-		selection := pass.TypesInfo.Selections[selector]
-		if selection == nil || !hasMethodTypeParameters(selection.Obj()) {
-			return
+	inspection.Preorder([]ast.Node{(*ast.FuncDecl)(nil), (*ast.SelectorExpr)(nil)}, func(node ast.Node) {
+		switch node := node.(type) {
+		case *ast.FuncDecl:
+			if node.Recv == nil || node.Type.TypeParams.NumFields() == 0 {
+				return
+			}
+			pass.Reportf(
+				node.Name.Pos(),
+				"generic method %s declares method-local type parameters, which are forbidden by boringlint; use a package-level generic function",
+				node.Name.Name,
+			)
+		case *ast.SelectorExpr:
+			selection := pass.TypesInfo.Selections[node]
+			if selection == nil || !hasMethodTypeParameters(selection.Obj()) {
+				return
+			}
+			pass.Reportf(
+				node.Sel.Pos(),
+				"use of generic method %s is forbidden by boringlint; use a package-level generic function",
+				node.Sel.Name,
+			)
 		}
-
-		pass.Reportf(
-			selector.Sel.Pos(),
-			"use of generic method %s is forbidden by boringlint; use a package-level generic function",
-			selector.Sel.Name,
-		)
 	})
 	//nolint:nilnil // analysis.Analyzer uses a nil result to mean no exported fact.
 	return nil, nil
-}
-
-// reportGenericMethods calls report for each method declaration with its own
-// type parameter list. It remains directly testable on toolchains where that
-// syntax is still rejected before an analysis driver can run.
-func reportGenericMethods(file *ast.File, report func(*ast.FuncDecl)) {
-	for _, declaration := range file.Decls {
-		decl, ok := declaration.(*ast.FuncDecl)
-		if !ok || decl.Recv == nil || decl.Type == nil {
-			continue
-		}
-		if params := decl.Type.TypeParams; params != nil && len(params.List) > 0 {
-			report(decl)
-		}
-	}
 }
 
 func hasMethodTypeParameters(object types.Object) bool {

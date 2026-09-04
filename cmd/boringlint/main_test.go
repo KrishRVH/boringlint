@@ -30,14 +30,6 @@ func TestCommand(t *testing.T) {
 			t.Errorf("help output does not contain %q:\n%s", analyzer, output)
 		}
 	}
-	command = exec.CommandContext(t.Context(), binary, "help", "nogenericmethod") // #nosec G204 -- binary is built by this test.
-	output, err = command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("show nogenericmethod help: %v\n%s", err, output)
-	}
-	if !bytes.Contains(output, []byte("Go 1.27 or newer")) {
-		t.Errorf("nogenericmethod help omits the driver requirement:\n%s", output)
-	}
 
 	want := []string{
 		"testdata/integration/integration.go:3:8: import of iter is forbidden by boringlint; accept dependency iterators without naming their type and materialize them at the boundary",
@@ -68,7 +60,7 @@ func TestCommandTargetGoVersions(t *testing.T) {
 	t.Parallel()
 
 	binary := buildCommand(t)
-	for _, version := range []string{"1.23.0", "1.24.0"} {
+	for _, version := range []string{"1.23.0", "1.24.0", "1.25.0", "1.26.0", "1.27.0"} {
 		t.Run("go"+version, func(t *testing.T) {
 			directory := t.TempDir()
 			writeTestFile(
@@ -249,7 +241,6 @@ func testCommandModes(
 				directory,
 				test.executable,
 				test.diagnosticArguments,
-				nil,
 				want,
 			)
 			assertSuccess(t, directory, test.executable, test.cleanArguments)
@@ -288,7 +279,7 @@ func testAnalyzerSelectionModes(
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			noIteratorArguments := append(slices.Clone(test.baseArguments), "-noiterator", target)
-			assertDiagnostics(t, directory, test.executable, noIteratorArguments, nil, want)
+			assertDiagnostics(t, directory, test.executable, noIteratorArguments, want)
 
 			noGenericMethodArguments := append(slices.Clone(test.baseArguments), "-nogenericmethod", target)
 			assertSuccess(t, directory, test.executable, noGenericMethodArguments)
@@ -312,16 +303,12 @@ func assertDiagnostics(
 	directory string,
 	executable string,
 	arguments []string,
-	environment []string,
 	want []string,
 ) {
 	t.Helper()
 
 	command := exec.CommandContext(t.Context(), executable, arguments...) // #nosec G204 -- all arguments are test-controlled.
 	command.Dir = directory
-	if environment != nil {
-		command.Env = environment
-	}
 	output, err := command.CombinedOutput()
 	if err == nil {
 		t.Fatalf("command succeeded; want diagnostics:\n%s", output)
@@ -333,35 +320,6 @@ func assertDiagnostics(
 	if !slices.Equal(got, want) {
 		t.Errorf("diagnostics =\n%s\nwant =\n%s\nraw output:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"), output)
 	}
-}
-
-func assertDiagnosticAlternatives(
-	t *testing.T,
-	directory string,
-	executable string,
-	arguments []string,
-	environment []string,
-	want [][]string,
-) {
-	t.Helper()
-
-	command := exec.CommandContext(t.Context(), executable, arguments...) // #nosec G204 -- all arguments are test-controlled.
-	command.Dir = directory
-	command.Env = environment
-	output, err := command.CombinedOutput()
-	if err == nil {
-		t.Fatalf("command succeeded; want diagnostics:\n%s", output)
-	}
-	got := diagnosticLines(output, directory)
-	slices.Sort(got)
-	for _, alternative := range want {
-		alternative = slices.Clone(alternative)
-		slices.Sort(alternative)
-		if slices.Equal(got, alternative) {
-			return
-		}
-	}
-	t.Errorf("diagnostics =\n%s\nwant one of =\n%v\nraw output:\n%s", strings.Join(got, "\n"), want, output)
 }
 
 func diagnosticLines(output []byte, directory string) []string {

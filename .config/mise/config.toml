@@ -8,11 +8,11 @@ lockfile = true
 GOTOOLCHAIN = "local"
 
 [tools]
-go = "1.26.5"
-gofumpt = "0.10.0"
+go = "1.27.1"
+gofumpt = "0.11.0"
 gitleaks = "8.30.1"
-golangci-lint = "2.12.2"
-"go:golang.org/x/vuln/cmd/govulncheck" = "1.6.0"
+golangci-lint = "2.13.2"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.7.0"
 
 [tasks.tasks]
 description = "List available project tasks"
@@ -87,11 +87,8 @@ description = "Run tests with the race detector"
 run = "go test -trimpath -race -count=1 ./..."
 
 [tasks."test:compat"]
-description = "Test the minimum supported and next Go releases"
-run = [
-  "GOTOOLCHAIN=go1.25.12 go test -trimpath -count=1 ./...",
-  "GOTOOLCHAIN=go1.27rc2 go test -trimpath -race -count=1 ./...",
-]
+description = "Test the minimum Go 1.27.0 toolchain"
+run = "GOTOOLCHAIN=go1.27.0 go test -trimpath -count=1 ./..."
 
 [tasks.bench]
 description = "Benchmark analyzer classification"

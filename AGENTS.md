@@ -20,8 +20,8 @@ Repository development goes through mise:
 - `mise run tasks`: list tasks.
 - `mise run standards`: format source and tidy the module.
 - `mise run test`: run the primary tests.
-- `mise run test:compat`: test Go 1.25 compatibility and Go 1.27 behavior,
-  including `nogenericmethod` diagnostics.
+- `mise run test:compat`: test the minimum Go 1.27.0 toolchain, including
+  `nogenericmethod` diagnostics and both command modes.
 - `mise run standards:check`: run the complete release gate.
 
 Do not invoke package managers, compilers, linters, or test runners directly
