@@ -52,7 +52,7 @@ honors `//nolint:noiterator`; `boringlint` does not ship that adapter.
 
 Building, installing, or importing `boringlint` requires Go 1.27.0 or newer.
 Both analyzers run with the same Go 1.27 parser and type checker. Development
-and the release gate use Go 1.27.1; a separate compatibility check runs the
+and the release gate use Go 1.27.3; a separate compatibility check runs the
 suite with the minimum Go 1.27.0 toolchain.
 
 Both command modes support projects declaring Go 1.23 through Go 1.27. Go 1.23
@@ -61,9 +61,9 @@ is the source-project floor because it introduced
 directive may be older than the toolchain used to build the analyzer.
 
 Analysis drivers consume
-[compiler export data](https://github.com/golang/tools/blob/v0.49.0/go/gcexportdata/gcexportdata.go)
+[compiler export data](https://github.com/golang/tools/blob/v0.52.0/go/gcexportdata/gcexportdata.go)
 and implement the
-[`go vet -vettool` protocol](https://github.com/golang/tools/blob/v0.49.0/go/analysis/unitchecker/unitchecker.go).
+[`go vet -vettool` protocol](https://github.com/golang/tools/blob/v0.52.0/go/analysis/unitchecker/unitchecker.go).
 Use a binary built with a supported toolchain at least as new as the code it
 analyzes. New Go releases are supported only after both command modes pass the
 compatibility gate. Any increase to the build minimum must be explicit in
@@ -191,7 +191,7 @@ mise run standards:check
 
 The full gate checks formatting, module integrity, static analysis,
 vulnerabilities, secrets, race behavior, and command integration. Tests run on
-Go 1.27.0 and Go 1.27.1, with both command modes also analyzing projects that
+Go 1.27.0 and Go 1.27.3, with both command modes also analyzing projects that
 declare Go 1.23 through Go 1.27.
 
 ### Release
