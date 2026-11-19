@@ -155,6 +155,59 @@ func pointerEmpty[T interface {
 	~*int
 	Keep()
 }](value T) {}
+
+type IntSequence interface {
+	~func(func(int) bool)
+}
+
+type StringSequence interface {
+	~func(func(string) bool)
+}
+
+type DiamondLeft interface{ Mixed }
+
+type DiamondRight interface{ Mixed }
+
+func anyUnionWithMethod[T interface {
+	any | ~func(func(int) bool)
+	Keep()
+}](value T) {}
+
+func interfaceUnion[T interface {
+	IntSequence | StringSequence
+}](value T) {}
+
+func mixedInterfaceUnion[T interface {
+	Mixed | MixedMap
+}](value T) {}
+
+func exactNamed[T MethodSequence](value T) {}
+
+func sliceWithMethod[T interface {
+	~func(func(int) bool) | ~[]int
+	Keep()
+}](value T) {}
+
+func structWithMethod[T interface {
+	~func(func(int) bool) | ~struct{ Value int }
+	Keep()
+}](value T) {}
+
+func intWithMethod[T interface {
+	~func(func(int) bool) | ~int
+	Keep()
+}](value T) {}
+
+func variadicMethod[T interface {
+	~func(func(int) bool)
+	Keep(...int)
+}](value T) {}
+
+func diamond[T interface {
+	DiamondLeft
+	DiamondRight
+	MixedMap
+}](value T) {}
 `
 	fileSet := token.NewFileSet()
 	file, err := parser.ParseFile(fileSet, "typeparams.go", source, 0)
@@ -176,6 +229,15 @@ func pointerEmpty[T interface {
 		{name: "narrowed", want: true},
 		{name: "methodNarrowed", want: true},
 		{name: "tildeMethodSequence", want: true},
+		{name: "interfaceUnion", want: true},
+		{name: "exactNamed", want: true},
+		{name: "variadicMethod", want: true},
+		{name: "diamond", want: true},
+		{name: "anyUnionWithMethod", want: false},
+		{name: "mixedInterfaceUnion", want: false},
+		{name: "sliceWithMethod", want: false},
+		{name: "structWithMethod", want: false},
+		{name: "intWithMethod", want: false},
 		{name: "mixed", want: false},
 		{name: "approximateBool", want: false},
 		{name: "eliminated", want: false},
@@ -219,7 +281,20 @@ func pointerEmpty[T interface {
 		})
 	}
 
-	makeTerms := func(offset int64) []*types.Term {
+	// Equal offsets normalize 200 syntactic terms to 100 candidates. Offset 99
+	// produces 199 distinct candidates whose intersection retains exactly one.
+	for _, offset := range []int64{0, 99} {
+		if !isIteratorType(newIteratorIntersection(offset)) {
+			t.Fatalf("isIteratorType() = false for accepted 100-term intersections with offset %d", offset)
+		}
+	}
+}
+
+// newIteratorIntersection returns a type parameter constrained by two 100-term
+// unions of iterator signatures. The second union's yield parameters start at
+// [offset]int, so offset 0 repeats the first union.
+func newIteratorIntersection(offset int64) *types.TypeParam {
+	union := func(offset int64) *types.Interface {
 		terms := make([]*types.Term, 100)
 		for index := range terms {
 			yield := types.NewSignatureType(
@@ -245,30 +320,18 @@ func pointerEmpty[T interface {
 			)
 			terms[index] = types.NewTerm(true, sequence)
 		}
-		return terms
+		return types.NewInterfaceType(nil, []types.Type{types.NewUnion(terms)}).Complete()
 	}
-	// Equal offsets normalize 200 syntactic terms to 100 candidates. Offset 99
-	// produces 199 distinct candidates whose intersection retains exactly one.
-	for _, offset := range []int64{0, 99} {
-		first := types.NewInterfaceType(nil, []types.Type{types.NewUnion(makeTerms(0))}).Complete()
-		second := types.NewInterfaceType(nil, []types.Type{types.NewUnion(makeTerms(offset))}).Complete()
-		constraint := types.NewInterfaceType(nil, []types.Type{first, second}).Complete()
-		typeParam := types.NewTypeParam(types.NewTypeName(token.NoPos, nil, "T", nil), constraint)
-		if !isIteratorType(typeParam) {
-			t.Fatalf("isIteratorType() = false for accepted 100-term intersections with offset %d", offset)
-		}
-	}
+	constraint := types.NewInterfaceType(nil, []types.Type{union(0), union(offset)}).Complete()
+	return types.NewTypeParam(types.NewTypeName(token.NoPos, nil, "T", nil), constraint)
 }
 
 func TestIteratorTypeSetUnexportedMethods(t *testing.T) {
 	t.Parallel()
 
-	methodSignature := types.NewSignatureType(nil, nil, nil, nil, nil, false)
+	projectPkg := types.NewPackage("example.com/project", "project")
 	pkg := types.NewPackage("example.com/dependency", "dependency")
-	methods := []*types.Func{
-		types.NewFunc(token.NoPos, pkg, "first", methodSignature),
-		types.NewFunc(token.NoPos, pkg, "second", methodSignature),
-	}
+	otherPkg := types.NewPackage("example.com/other", "other")
 	yield := types.NewSignatureType(
 		nil,
 		nil,
@@ -285,50 +348,37 @@ func TestIteratorTypeSetUnexportedMethods(t *testing.T) {
 		nil,
 		false,
 	)
-	constraint := types.NewInterfaceType(
-		methods,
-		[]types.Type{types.NewUnion([]*types.Term{types.NewTerm(true, iterator)})},
-	).Complete()
-	typeParam := types.NewTypeParam(
-		types.NewTypeName(token.NoPos, pkg, "T", nil),
-		constraint,
-	)
-
-	if !isIteratorType(typeParam) {
-		t.Fatal("isIteratorType() = false for same-package unexported methods")
-	}
-}
-
-func TestSamePackage(t *testing.T) {
-	t.Parallel()
-
-	pkg := types.NewPackage("example.com/dependency", "dependency")
 	for _, test := range []struct {
-		name        string
-		left, right *types.Package
-		want        bool
+		name     string
+		otherPkg *types.Package
+		want     bool
 	}{
-		{name: "same object", left: pkg, right: pkg, want: true},
-		{
-			name:  "same path",
-			left:  types.NewPackage("example.com/dependency", "first"),
-			right: types.NewPackage("example.com/dependency", "second"),
-			want:  true,
-		},
-		{
-			name:  "different path",
-			left:  types.NewPackage("example.com/first", "dependency"),
-			right: types.NewPackage("example.com/second", "dependency"),
-			want:  false,
-		},
-		{name: "both nil", want: true},
-		{name: "one nil", left: pkg, want: false},
+		{name: "same package", otherPkg: pkg, want: true},
+		// A witness can declare only its own package's unexported methods, and
+		// a function type cannot embed a type that would promote the others.
+		{name: "different packages", otherPkg: otherPkg, want: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := samePackage(test.left, test.right); got != test.want {
-				t.Fatalf("samePackage() = %t, want %t", got, test.want)
+			// NewInterfaceType records receivers in method signatures, so each
+			// parallel subtest needs its own.
+			methodSignature := types.NewSignatureType(nil, nil, nil, nil, nil, false)
+			methods := []*types.Func{
+				types.NewFunc(token.NoPos, pkg, "first", methodSignature),
+				types.NewFunc(token.NoPos, test.otherPkg, "second", methodSignature),
+			}
+			constraint := types.NewInterfaceType(
+				methods,
+				[]types.Type{types.NewUnion([]*types.Term{types.NewTerm(true, iterator)})},
+			).Complete()
+			typeParam := types.NewTypeParam(
+				types.NewTypeName(token.NoPos, projectPkg, "T", nil),
+				constraint,
+			)
+
+			if got := isIteratorType(typeParam); got != test.want {
+				t.Fatalf("isIteratorType() = %t, want %t", got, test.want)
 			}
 		})
 	}
@@ -337,42 +387,21 @@ func TestSamePackage(t *testing.T) {
 func TestParenthesizedIteratorTypeHasOneDiagnostic(t *testing.T) {
 	t.Parallel()
 
-	const source = `package parenthesized
+	// gofumpt strips these parentheses from checked-in fixtures.
+	testdata, cleanup, err := analysistest.WriteFiles(map[string]string{
+		"parenthesized/parenthesized.go": `package parenthesized
 
-type Sequence func(func(int) bool)
-type ParenthesizedIterator (Sequence)
-`
-	fileSet := token.NewFileSet()
-	file, err := parser.ParseFile(fileSet, "parenthesized.go", source, 0)
+type Sequence func(func(int) bool) // want "iterator-shaped type"
+
+type ParenthesizedIterator (Sequence) // want "iterator-shaped type"
+`,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	typeInfo := &types.Info{
-		Types: make(map[ast.Expr]types.TypeAndValue),
-		Defs:  make(map[*ast.Ident]types.Object),
-		Uses:  make(map[*ast.Ident]types.Object),
-	}
-	pkg, err := new(types.Config).Check("parenthesized", fileSet, []*ast.File{file}, typeInfo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	typeSpec := file.Decls[1].(*ast.GenDecl).Specs[0].(*ast.TypeSpec)
-	var diagnostics []analysis.Diagnostic
-	pass := &analysis.Pass{
-		Analyzer:  NoIterator,
-		Fset:      fileSet,
-		Pkg:       pkg,
-		TypesInfo: typeInfo,
-		Report: func(diagnostic analysis.Diagnostic) {
-			diagnostics = append(diagnostics, diagnostic)
-		},
-	}
+	t.Cleanup(cleanup)
 
-	reportIteratorTypeSpec(pass, typeSpec)
-
-	if len(diagnostics) != 1 {
-		t.Fatalf("diagnostics = %v, want exactly one", diagnostics)
-	}
+	analysistest.Run(t, testdata, NoIterator, "parenthesized")
 }
 
 func BenchmarkIsIteratorType(b *testing.B) {
@@ -397,6 +426,19 @@ func BenchmarkIsIteratorType(b *testing.B) {
 	for b.Loop() {
 		if !isIteratorType(iterator) {
 			b.Fatal("iterator signature was not recognized")
+		}
+	}
+}
+
+// BenchmarkIsIteratorTypeSet measures the type-set path, which builds and
+// checks a candidate for each of 199 distinct terms.
+func BenchmarkIsIteratorTypeSet(b *testing.B) {
+	typeParam := newIteratorIntersection(99)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		if !isIteratorType(typeParam) {
+			b.Fatal("iterator type set was not recognized")
 		}
 	}
 }

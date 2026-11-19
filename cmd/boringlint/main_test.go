@@ -51,6 +51,8 @@ func TestCommand(t *testing.T) {
 			binary,
 			filepath.Join("..", ".."),
 			"./testdata/integration",
+			"noiterator",
+			"nogenericmethod",
 			want,
 		)
 	})
@@ -90,6 +92,7 @@ type Sequence[T any] interface {
 import (
 	"example.com/target/dependency"
 	"iter"
+	"math/rand/v2"
 )
 
 type SequenceAlias = dependency.Sequence[int]
@@ -106,6 +109,10 @@ func use() {
 	for range sequence() {
 	}
 }
+
+func random(source *rand.Rand) int {
+	return source.N(10)
+}
 `)
 
 			testCommandModes(
@@ -116,10 +123,11 @@ func use() {
 				"./diagnostic",
 				[]string{
 					"diagnostic/diagnostic.go:5:2: import of iter is forbidden by boringlint; accept dependency iterators without naming their type and materialize them at the boundary",
-					"diagnostic/diagnostic.go:8:22: constraint example.com/target/dependency.Sequence[int] contains an iterator-shaped term, which is forbidden by boringlint; materialize dependency iterators at the call boundary",
-					"diagnostic/diagnostic.go:10:6: iterator-shaped type func(yield func(int) bool) is forbidden by boringlint; materialize dependency iterators at the call boundary",
-					"diagnostic/diagnostic.go:14:17: iterator-shaped type iter.Seq[int] is forbidden by boringlint; materialize dependency iterators at the call boundary",
-					"diagnostic/diagnostic.go:19:6: range over a function value (iter.Seq[int]) is forbidden by boringlint; iterate concrete data or materialize at the dependency boundary",
+					"diagnostic/diagnostic.go:9:22: constraint example.com/target/dependency.Sequence[int] contains an iterator-shaped term, which is forbidden by boringlint; materialize dependency iterators at the call boundary",
+					"diagnostic/diagnostic.go:11:6: iterator-shaped type func(yield func(int) bool) is forbidden by boringlint; materialize dependency iterators at the call boundary",
+					"diagnostic/diagnostic.go:15:17: iterator-shaped type iter.Seq[int] is forbidden by boringlint; materialize dependency iterators at the call boundary",
+					"diagnostic/diagnostic.go:20:6: range over a function value (iter.Seq[int]) is forbidden by boringlint; iterate concrete data or materialize at the dependency boundary",
+					"diagnostic/diagnostic.go:25:16: use of generic method N is forbidden by boringlint; use a package-level generic function",
 				},
 			)
 		})
@@ -253,6 +261,8 @@ func testAnalyzerSelectionModes(
 	binary string,
 	directory string,
 	target string,
+	reporting string,
+	silent string,
 	want []string,
 ) {
 	t.Helper()
@@ -278,11 +288,11 @@ func testAnalyzerSelectionModes(
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			noIteratorArguments := append(slices.Clone(test.baseArguments), "-noiterator", target)
-			assertDiagnostics(t, directory, test.executable, noIteratorArguments, want)
+			reportingArguments := append(slices.Clone(test.baseArguments), "-"+reporting, target)
+			assertDiagnostics(t, directory, test.executable, reportingArguments, want)
 
-			noGenericMethodArguments := append(slices.Clone(test.baseArguments), "-nogenericmethod", target)
-			assertSuccess(t, directory, test.executable, noGenericMethodArguments)
+			silentArguments := append(slices.Clone(test.baseArguments), "-"+silent, target)
+			assertSuccess(t, directory, test.executable, silentArguments)
 		})
 	}
 }
@@ -329,7 +339,7 @@ func diagnosticLines(output []byte, directory string) []string {
 	}
 	prefix := filepath.ToSlash(absoluteDirectory) + "/"
 	var diagnostics []string
-	for line := range strings.Lines(string(output)) {
+	for _, line := range strings.Split(string(output), "\n") {
 		line = filepath.ToSlash(strings.TrimSpace(line))
 		if line == "" || strings.HasPrefix(line, "# ") {
 			continue

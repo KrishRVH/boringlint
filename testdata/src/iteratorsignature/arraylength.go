@@ -19,3 +19,5 @@ type IteratorElements [unsafe.Sizeof(func(value func(func(int) bool)) {})]func(f
 func ArrayParameter(value [unsafe.Sizeof(func(sequence func(func(int) bool)) {})]byte) {
 	_ = value
 }
+
+type NamedConvertedLength [unsafe.Sizeof(Sequence(nil))]byte

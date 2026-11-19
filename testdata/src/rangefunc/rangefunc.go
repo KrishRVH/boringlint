@@ -124,6 +124,13 @@ func allowedRanges[S sliceLike[int]](values S) {
 	for _, value := range "abc" {
 		_ = value
 	}
+	array := [3]int{1, 2, 3}
+	for _, value := range array {
+		_ = value
+	}
+	for index := range &array {
+		_ = index
+	}
 }
 
 func allowedIntersection[S onlySlice](values S) {

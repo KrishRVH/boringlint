@@ -64,17 +64,15 @@ func allowed(random *rand.Rand) {
 func converter() func(int) int { return identity }
 `)
 
-	testCommandModes(
-		t,
-		buildCommand(t),
-		directory,
-		"./clean",
-		"./project",
-		[]string{
-			"project/genericmethod.go:10:15: generic method LocalMap declares method-local type parameters, which are forbidden by boringlint; use a package-level generic function",
-			"project/genericmethod.go:16:10: use of generic method Map is forbidden by boringlint; use a package-level generic function",
-			"project/genericmethod.go:17:12: use of generic method LocalMap is forbidden by boringlint; use a package-level generic function",
-			"project/genericmethod.go:18:13: use of generic method N is forbidden by boringlint; use a package-level generic function",
-		},
-	)
+	binary := buildCommand(t)
+	want := []string{
+		"project/genericmethod.go:10:15: generic method LocalMap declares method-local type parameters, which are forbidden by boringlint; use a package-level generic function",
+		"project/genericmethod.go:16:10: use of generic method Map is forbidden by boringlint; use a package-level generic function",
+		"project/genericmethod.go:17:12: use of generic method LocalMap is forbidden by boringlint; use a package-level generic function",
+		"project/genericmethod.go:18:13: use of generic method N is forbidden by boringlint; use a package-level generic function",
+	}
+	testCommandModes(t, binary, directory, "./clean", "./project", want)
+	t.Run("selection", func(t *testing.T) {
+		testAnalyzerSelectionModes(t, binary, directory, "./project", "nogenericmethod", "noiterator", want)
+	})
 }

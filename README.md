@@ -52,7 +52,7 @@ honors `//nolint:noiterator`; `boringlint` does not ship that adapter.
 
 Building, installing, or importing `boringlint` requires Go 1.27.0 or newer.
 Both analyzers run with the same Go 1.27 parser and type checker. Development
-and the release gate use Go 1.27.3; a separate compatibility check runs the
+and the release gate use Go 1.27.4; a separate compatibility check runs the
 suite with the minimum Go 1.27.0 toolchain.
 
 Both command modes support projects declaring Go 1.23 through Go 1.27. Go 1.23
@@ -61,9 +61,9 @@ is the source-project floor because it introduced
 directive may be older than the toolchain used to build the analyzer.
 
 Analysis drivers consume
-[compiler export data](https://github.com/golang/tools/blob/v0.52.0/go/gcexportdata/gcexportdata.go)
+[compiler export data](https://github.com/golang/tools/blob/v0.53.0/go/gcexportdata/gcexportdata.go)
 and implement the
-[`go vet -vettool` protocol](https://github.com/golang/tools/blob/v0.52.0/go/analysis/unitchecker/unitchecker.go).
+[`go vet -vettool` protocol](https://github.com/golang/tools/blob/v0.53.0/go/analysis/unitchecker/unitchecker.go).
 Use a binary built with a supported toolchain at least as new as the code it
 analyzes. New Go releases are supported only after both command modes pass the
 compatibility gate. Any increase to the build minimum must be explicit in
@@ -86,9 +86,18 @@ Rejects:
 - project type declarations that name constraints containing iterator-shaped
   terms, including mixed unions and intersections that eliminate those terms.
 
-Each independently named hidden constraint term is reported at that term. A
-whole type-parameter diagnostic does not replace diagnostics for distinct
-named terms inside its constraint.
+A type is iterator-shaped when it is a function with exactly one parameter and
+no results, and that parameter is a non-variadic function of at most two
+parameters whose only result is `bool`. A type parameter is iterator-shaped
+when its type set is nonempty and contains only iterator-shaped types. The check
+is structural, so a declaration taking a single predicate callback, such as
+`func SetFilter(keep func(Event) bool)`, is rejected too.
+
+In type declarations, a named constraint that hides an iterator-shaped term is
+reported at that term, and an iterator-shaped type parameter is reported at its
+constraint rather than at its uses. In function and method declarations, each
+use of an iterator-shaped type parameter in the signature is reported; a type
+parameter that the signature does not use is reported at its declaration.
 
 ```go
 import "iter" // rejected
@@ -189,17 +198,18 @@ mise run standards
 mise run standards:check
 ```
 
-The full gate checks formatting, module integrity, static analysis,
-vulnerabilities, secrets, race behavior, and command integration. Tests run on
-Go 1.27.0 and Go 1.27.3, with both command modes also analyzing projects that
-declare Go 1.23 through Go 1.27.
+The full gate checks formatting, module integrity, static analysis (including
+boringlint on its own source), vulnerabilities, secrets, race behavior, and
+command integration. Tests run on Go 1.27.0 and Go 1.27.4, with both command
+modes also analyzing projects that declare Go 1.23 through Go 1.27.
 
 ### Release
 
 Release only an exact commit that has passed both the local and remote gates:
 
-1. Review the pinned mise tools and CI mise runtime. If a tool pin changes, run
-   `mise run lock`; never edit the lockfile by hand.
+1. Review the pinned mise tools and CI mise runtime, and the Go and x/tools
+   versions this README cites. If a tool pin changes, run `mise run lock`;
+   never edit the lockfile by hand.
 2. Run `mise run standards:check`, review the complete diff, and commit with a
    Conventional Commit.
 3. Confirm `git status --short` is empty, push the commit, and wait for CI to

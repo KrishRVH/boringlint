@@ -1,6 +1,9 @@
 package iteratorprovider
 
-import "iter"
+import (
+	"iter"
+	"unsafe"
+)
 
 type Sequence[T any] interface {
 	~func(func(T) bool)
@@ -69,6 +72,24 @@ type TransitiveSequence interface {
 type EmptySequence interface {
 	SequenceOrSlice
 	~string
+}
+
+type PairSequence[K, V any] interface {
+	~func(func(K, V) bool)
+}
+
+type SequenceConstraintAlias = interface {
+	~func(func(int) bool)
+}
+
+type AnyOrSequenceWithMethod interface {
+	any | ~func(func(int) bool)
+	Keep()
+}
+
+type UnsafePointerOrSequence interface {
+	~func(func(int) bool) | ~unsafe.Pointer
+	keep()
 }
 
 type Predicate interface {

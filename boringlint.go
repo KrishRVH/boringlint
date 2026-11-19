@@ -30,25 +30,22 @@ var NoIterator = &analysis.Analyzer{
 
 func runNoIterator(pass *analysis.Pass) (any, error) {
 	inspection := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
-	inspection.Nodes(
+	inspection.Preorder(
 		[]ast.Node{
 			(*ast.ImportSpec)(nil),
 			(*ast.FuncDecl)(nil),
 			(*ast.TypeSpec)(nil),
 			(*ast.RangeStmt)(nil),
 		},
-		func(node ast.Node, push bool) bool {
-			if !push {
-				return true
-			}
-			return inspectIteratorNode(pass, node)
+		func(node ast.Node) {
+			inspectIteratorNode(pass, node)
 		},
 	)
 	//nolint:nilnil // analysis.Analyzer uses a nil result to mean no exported fact.
 	return nil, nil
 }
 
-func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
+func inspectIteratorNode(pass *analysis.Pass, node ast.Node) {
 	switch node := node.(type) {
 	case *ast.ImportSpec:
 		path, err := strconv.Unquote(node.Path.Value)
@@ -58,18 +55,17 @@ func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 				"import of iter is forbidden by boringlint; accept dependency iterators without naming their type and materialize them at the boundary",
 			)
 		}
-		return false
 	case *ast.FuncDecl:
 		if object := pass.TypesInfo.Defs[node.Name]; object != nil {
 			reportIteratorType(pass, node.Name.Pos(), object.Type())
 		}
-		reportIteratorTypes(pass, false, node.Type)
+		newIteratorTypeReporter(pass, false).report(node.Type)
 	case *ast.TypeSpec:
 		reportIteratorTypeSpec(pass, node)
 	case *ast.RangeStmt:
 		typ := pass.TypesInfo.TypeOf(node.X)
 		if !isRangeFunctionType(typ) {
-			return true
+			return
 		}
 
 		pass.Reportf(
@@ -78,23 +74,22 @@ func inspectIteratorNode(pass *analysis.Pass, node ast.Node) bool {
 			types.TypeString(typ, types.RelativeTo(pass.Pkg)),
 		)
 	}
-	return true
 }
 
 func reportIteratorTypeSpec(pass *analysis.Pass, node *ast.TypeSpec) {
-	if node.TypeParams == nil {
-		covered := reportIteratorTypes(pass, true, node.Type)
-		reportIteratorTypeTerms(pass, covered, node.Type)
-		return
+	reporter := newIteratorTypeReporter(pass, true)
+	// A nil *ast.FieldList is a non-nil ast.Node, so include it only when present.
+	roots := []ast.Node{node.Type}
+	if node.TypeParams != nil {
+		reporter.markIteratorTypeParams(node.TypeParams)
+		roots = []ast.Node{node.TypeParams, node.Type}
 	}
-
-	covered := reportIteratorTypes(pass, true, node.TypeParams, node.Type)
-	reportIteratorTypeTerms(pass, covered, node.TypeParams, node.Type)
+	covered := reporter.report(roots...)
+	reportIteratorTypeTerms(pass, covered, roots...)
 }
 
 type iteratorConstraint struct {
 	position   token.Pos
-	root       ast.Expr
 	typeParams []*types.TypeParam
 }
 
@@ -102,25 +97,38 @@ type iteratorTypeReporter struct {
 	pass               *analysis.Pass
 	pendingConstraints []iteratorConstraint
 	reportedTypeParams map[*types.TypeParam]bool
-	reportedTypeNames  map[types.Object]bool
 	coveredTypeTerms   map[ast.Expr]bool
-	preferTypeTerms    bool
+	// preferTypeTerms selects type-declaration reporting: hidden constraint
+	// terms and type parameters are reported at constraints, not at uses.
+	preferTypeTerms bool
 }
 
-// reportIteratorTypes scans every root before resolving pending constraints and
-// returns expressions already covered by either diagnostic path.
-func reportIteratorTypes(
-	pass *analysis.Pass,
-	preferTypeTerms bool,
-	roots ...ast.Node,
-) map[ast.Expr]bool {
-	reporter := iteratorTypeReporter{
+func newIteratorTypeReporter(pass *analysis.Pass, preferTypeTerms bool) *iteratorTypeReporter {
+	return &iteratorTypeReporter{
 		pass:               pass,
 		reportedTypeParams: make(map[*types.TypeParam]bool),
-		reportedTypeNames:  make(map[types.Object]bool),
 		coveredTypeTerms:   make(map[ast.Expr]bool),
 		preferTypeTerms:    preferTypeTerms,
 	}
+}
+
+// markIteratorTypeParams records a type declaration's iterator-shaped type
+// parameters before any root is scanned. Each is reported at its own
+// constraint, so references from other constraints, including earlier ones,
+// are not reported again.
+func (reporter *iteratorTypeReporter) markIteratorTypeParams(typeParams *ast.FieldList) {
+	for _, field := range typeParams.List {
+		for _, name := range field.Names {
+			if typeParam := reporter.declaredTypeParam(name); typeParam != nil && isIteratorType(typeParam) {
+				reporter.reportedTypeParams[typeParam] = true
+			}
+		}
+	}
+}
+
+// report scans every root before resolving pending constraints and returns
+// expressions already covered by either diagnostic path.
+func (reporter *iteratorTypeReporter) report(roots ...ast.Node) map[ast.Expr]bool {
 	for _, root := range roots {
 		reporter.walk(root)
 	}
@@ -141,9 +149,7 @@ func (reporter *iteratorTypeReporter) walk(root ast.Node) bool {
 			reported = reporter.walkField(node) || reported
 			return false
 		case ast.Expr:
-			if reporter.reportExpression(node) {
-				reported = true
-			}
+			reported = reporter.reportExpression(node) || reported
 		}
 		return true
 	})
@@ -159,44 +165,37 @@ func (reporter *iteratorTypeReporter) walkField(field *ast.Field) bool {
 			field.Type,
 		) || reported
 	}
-	if reported && !reporter.preferTypeTerms {
-		return true
-	}
 
-	constraint := iteratorConstraint{root: field.Type}
+	var constraint iteratorConstraint
 	for _, name := range field.Names {
-		reporter.collectConstraintTypeParam(&constraint, name, reported)
+		reporter.collectConstraintTypeParam(&constraint, name)
 	}
 	if reported || len(constraint.typeParams) == 0 {
 		return reported
 	}
 
-	// Named interface constraints expose their iterator shape only through
-	// go/types, so defer the fallback until the rest of the declaration is scanned.
+	// A named constraint exposes its iterator shape only through go/types. Defer
+	// the fallback until the rest of the declaration is scanned, so a reported
+	// use can stand in for it.
 	reporter.pendingConstraints = append(reporter.pendingConstraints, constraint)
 	return false
+}
+
+func (reporter *iteratorTypeReporter) declaredTypeParam(name *ast.Ident) *types.TypeParam {
+	typeName, ok := reporter.pass.TypesInfo.Defs[name].(*types.TypeName)
+	if !ok {
+		return nil
+	}
+	typeParam, _ := typeName.Type().(*types.TypeParam)
+	return typeParam
 }
 
 func (reporter *iteratorTypeReporter) collectConstraintTypeParam(
 	constraint *iteratorConstraint,
 	name *ast.Ident,
-	fieldReported bool,
 ) {
-	typeName, ok := reporter.pass.TypesInfo.Defs[name].(*types.TypeName)
-	if !ok {
-		return
-	}
-	typeParam, ok := typeName.Type().(*types.TypeParam)
-	if !ok {
-		return
-	}
-
-	iterator := isIteratorType(typeParam)
-	if reporter.preferTypeTerms && (fieldReported || iterator) {
-		reporter.reportedTypeParams[typeParam] = true
-		reporter.reportedTypeNames[typeName] = true
-	}
-	if !iterator {
+	typeParam := reporter.declaredTypeParam(name)
+	if typeParam == nil || !isIteratorType(typeParam) {
 		return
 	}
 	if constraint.position == token.NoPos {
@@ -207,22 +206,17 @@ func (reporter *iteratorTypeReporter) collectConstraintTypeParam(
 
 func (reporter *iteratorTypeReporter) reportExpression(expr ast.Expr) bool {
 	if reporter.coveredTypeTerms[expr] {
-		coverEquivalentTypeExpressions(reporter.coveredTypeTerms, expr)
 		return false
 	}
 	typ := reporter.pass.TypesInfo.TypeOf(expr)
-	if typeParam, ok := types.Unalias(typ).(*types.TypeParam); ok && reporter.preferTypeTerms {
-		if ident, ok := expr.(*ast.Ident); ok && reporter.reportedTypeNames[reporter.pass.TypesInfo.Uses[ident]] {
-			return false
-		}
-		if reporter.typeParamWasReported([]*types.TypeParam{typeParam}) {
-			return false
-		}
+	typeParam, isTypeParam := types.Unalias(typ).(*types.TypeParam)
+	if isTypeParam && reporter.preferTypeTerms && reporter.reportedTypeParams[typeParam] {
+		return false
 	}
 	if !reportIteratorType(reporter.pass, expr.Pos(), typ) {
 		return false
 	}
-	if typeParam, ok := types.Unalias(typ).(*types.TypeParam); ok {
+	if isTypeParam {
 		reporter.reportedTypeParams[typeParam] = true
 	}
 	reporter.coveredTypeTerms[expr] = true
@@ -232,26 +226,21 @@ func (reporter *iteratorTypeReporter) reportExpression(expr ast.Expr) bool {
 
 func (reporter *iteratorTypeReporter) reportPendingConstraints() {
 	for _, constraint := range reporter.pendingConstraints {
-		if reporter.preferTypeTerms {
-			reporter.coveredTypeTerms[constraint.root] = true
-			reportIteratorType(reporter.pass, constraint.position, constraint.typeParams[0])
-			continue
-		}
-
-		reporter.coveredTypeTerms[constraint.root] = true
-		if reporter.typeParamWasReported(constraint.typeParams) {
+		// Type declarations mark every iterator type parameter up front, so only
+		// function declarations can rely on a use having been reported.
+		if !reporter.preferTypeTerms && reporter.anyTypeParamReported(constraint.typeParams) {
 			continue
 		}
 		reportIteratorType(reporter.pass, constraint.position, constraint.typeParams[0])
 	}
 }
 
-func (reporter *iteratorTypeReporter) typeParamWasReported(typeParams []*types.TypeParam) bool {
+// anyTypeParamReported relies on go/types type parameters being identical only
+// to themselves, so pointer lookup matches types.Identical.
+func (reporter *iteratorTypeReporter) anyTypeParamReported(typeParams []*types.TypeParam) bool {
 	for _, typeParam := range typeParams {
-		for reported := range reporter.reportedTypeParams {
-			if typeParam == reported || types.Identical(typeParam, reported) {
-				return true
-			}
+		if reporter.reportedTypeParams[typeParam] {
+			return true
 		}
 	}
 	return false
@@ -283,7 +272,6 @@ func reportIteratorTypeTerms(pass *analysis.Pass, covered map[ast.Expr]bool, roo
 				return true
 			}
 			if covered[expr] {
-				coverEquivalentTypeExpressions(covered, expr)
 				return true
 			}
 			typ := iteratorTermType(pass, expr)
@@ -317,10 +305,6 @@ func coverEquivalentTypeExpressions(covered map[ast.Expr]bool, expr ast.Expr) {
 			next = expr.X
 		case *ast.SelectorExpr:
 			next = expr.Sel
-		case *ast.UnaryExpr:
-			if expr.Op == token.TILDE {
-				next = expr.X
-			}
 		}
 		if next == nil {
 			return
@@ -408,12 +392,13 @@ func isBooleanType(typ types.Type) bool {
 
 	typeParam, ok := typ.(*types.TypeParam)
 	return ok && hasOnlyAcceptedTypes(typeParam, func(candidate types.Type) bool {
-		return types.Identical(types.Unalias(candidate), types.Typ[types.Bool])
+		return types.Identical(candidate, types.Typ[types.Bool])
 	})
 }
 
-// go/types validates the signature before the analyzer runs; this only
-// distinguishes function ranges from the other legal range operands.
+// isRangeFunctionType reports whether typ is a function range operand. go/types
+// validates the signature before the analyzer runs, so this only distinguishes
+// function ranges from the other legal range operands.
 func isRangeFunctionType(typ types.Type) bool {
 	if typ == nil {
 		return false
@@ -438,11 +423,13 @@ func hasOnlyAcceptedSignatures(
 	accept func(*types.Signature) bool,
 ) bool {
 	return hasOnlyAcceptedTypes(typeParam, func(candidate types.Type) bool {
-		signature, ok := types.Unalias(candidate).Underlying().(*types.Signature)
+		signature, ok := candidate.Underlying().(*types.Signature)
 		return ok && accept(signature)
 	})
 }
 
+// hasOnlyAcceptedTypes reports whether typeParam's type set has at least one
+// finite candidate and accept holds for every candidate.
 func hasOnlyAcceptedTypes(
 	typeParam *types.TypeParam,
 	accept func(types.Type) bool,
@@ -451,12 +438,12 @@ func hasOnlyAcceptedTypes(
 	if !ok {
 		return false
 	}
-	constraint.Complete()
 
-	// Exact terms are checked directly. An eligible ~T term needs a named
-	// witness carrying the constraint's methods; types that cannot be receiver
-	// bases remain direct candidates. Satisfies then filters methods,
-	// comparability, and intersections. No survivor is not a universal match.
+	// Exact terms are candidates as written. A ~T term whose underlying type
+	// can have methods becomes a named witness carrying the constraint's
+	// methods; other ~T terms stay direct candidates. Satisfies then filters
+	// methods, comparability, and intersections, and a type set with no
+	// surviving candidate does not match.
 	var terms []*types.Term
 	collectTypeSetTerms(typeParam.Constraint(), make(map[types.Type]bool), &terms)
 	found := false
@@ -481,10 +468,6 @@ func collectTypeSetTerms(
 	seen map[types.Type]bool,
 	terms *[]*types.Term,
 ) {
-	if typ == nil {
-		return
-	}
-
 	typ = types.Unalias(typ)
 	if seen[typ] {
 		return
@@ -492,8 +475,6 @@ func collectTypeSetTerms(
 	seen[typ] = true
 
 	switch typ := typ.(type) {
-	case *types.TypeParam:
-		collectTypeSetTerms(typ.Constraint(), seen, terms)
 	case *types.Named:
 		if constraint, ok := typ.Underlying().(*types.Interface); ok {
 			collectTypeSetTerms(constraint, seen, terms)
@@ -501,27 +482,13 @@ func collectTypeSetTerms(
 		}
 		appendTypeSetTerm(types.NewTerm(false, typ), terms)
 	case *types.Interface:
-		collectInterfaceTypeSetTerms(typ, seen, terms)
+		for index := range typ.NumEmbeddeds() {
+			collectTypeSetTerms(typ.EmbeddedType(index), seen, terms)
+		}
 	case *types.Union:
 		collectUnionTypeSetTerms(typ, seen, terms)
 	default:
 		appendTypeSetTerm(types.NewTerm(false, typ), terms)
-	}
-}
-
-func collectInterfaceTypeSetTerms(
-	constraint *types.Interface,
-	seen map[types.Type]bool,
-	terms *[]*types.Term,
-) {
-	constraint.Complete()
-	// Interface.Empty reports the all-types set, which has no finite leaf
-	// candidates to prove universally accepted.
-	if constraint.Empty() {
-		return
-	}
-	for index := range constraint.NumEmbeddeds() {
-		collectTypeSetTerms(constraint.EmbeddedType(index), seen, terms)
 	}
 }
 
@@ -530,7 +497,8 @@ func collectUnionTypeSetTerms(
 	seen map[types.Type]bool,
 	terms *[]*types.Term,
 ) {
-	// The wrapper is Empty only when the union denotes the all-types set.
+	// The wrapper is Empty only when the union denotes the all-types set, which
+	// has no finite leaf candidates to prove universally accepted.
 	if types.NewInterfaceType(nil, []types.Type{union}).Complete().Empty() {
 		return
 	}
@@ -562,55 +530,26 @@ func canDeclareMethods(underlying types.Type) bool {
 	case *types.Array, *types.Chan, *types.Map, *types.Signature, *types.Slice, *types.Struct:
 		return true
 	case *types.Basic:
-		return underlying.Kind() != types.Invalid &&
-			underlying.Kind() != types.UnsafePointer &&
-			underlying.Info()&types.IsUntyped == 0
+		// unsafe.Pointer cannot be a receiver base type.
+		return underlying.Kind() != types.UnsafePointer
 	default:
 		return false
 	}
 }
 
+// newMethodWitness returns a named type with the given underlying type and the
+// constraint's methods, or nil when no Go declaration could have that shape.
 func newMethodWitness(
 	typeParam *types.TypeParam,
 	underlying types.Type,
 	constraint *types.Interface,
 ) types.Type {
-	pkg := typeParam.Obj().Pkg()
-	canAddMethods := true
-	var privatePkg *types.Package
-	privatePkgSet := false
-	for index := range constraint.NumMethods() {
-		method := constraint.Method(index)
-		if pkg == nil {
-			pkg = method.Pkg()
-		}
-		if method.Exported() {
-			continue
-		}
-		if !privatePkgSet {
-			privatePkg = method.Pkg()
-			privatePkgSet = true
-			continue
-		}
-		if !samePackage(privatePkg, method.Pkg()) {
-			canAddMethods = false
-		}
-	}
-	if privatePkgSet {
-		pkg = privatePkg
-	}
-
+	pkg := witnessPackage(typeParam, constraint)
 	typeName := types.NewTypeName(token.NoPos, pkg, "boringlintWitness", nil)
 	witness := types.NewNamed(typeName, underlying, nil)
-	if !canAddMethods {
-		return witness
-	}
 	for index := range constraint.NumMethods() {
 		method := constraint.Method(index)
-		signature, ok := method.Type().(*types.Signature)
-		if !ok {
-			return nil
-		}
+		signature := method.Signature()
 		receiver := types.NewVar(token.NoPos, pkg, "", witness)
 		witness.AddMethod(types.NewFunc(
 			method.Pos(),
@@ -630,9 +569,22 @@ func newMethodWitness(
 	return validatedMethodWitness(witness, constraint)
 }
 
+// witnessPackage chooses the package that declares a method witness: the
+// package of the constraint's first unexported method, since only that package
+// can declare it, or else the type parameter's package.
+func witnessPackage(typeParam *types.TypeParam, constraint *types.Interface) *types.Package {
+	for index := range constraint.NumMethods() {
+		if method := constraint.Method(index); !method.Exported() {
+			return method.Pkg()
+		}
+	}
+	return typeParam.Obj().Pkg()
+}
+
 func validatedMethodWitness(witness *types.Named, constraint *types.Interface) types.Type {
 	// Named.AddMethod permits synthetic field/method collisions that Go source
-	// does not. The computed method set filters those impossible witnesses.
+	// does not, and the witness package cannot declare another package's
+	// unexported methods. The computed method set filters both.
 	methodSet := types.NewMethodSet(witness)
 	for index := range constraint.NumMethods() {
 		method := constraint.Method(index)
@@ -643,15 +595,9 @@ func validatedMethodWitness(witness *types.Named, constraint *types.Interface) t
 	return witness
 }
 
-func samePackage(left, right *types.Package) bool {
-	if left == nil || right == nil {
-		return left == right
-	}
-	return left.Path() == right.Path()
-}
-
-// Find an accepted signature term in typ. When typeParam is non-nil, let
-// go/types also prove that every possible type is assignable to the candidate.
+// hasAcceptedSignature reports whether typ contains an accepted signature term.
+// When typeParam is non-nil, go/types must also prove that every type in its
+// type set is assignable to that signature.
 //
 //nolint:gocognit // Constraint graphs require recursive handling of each go/types node kind.
 func hasAcceptedSignature(
@@ -660,10 +606,6 @@ func hasAcceptedSignature(
 	accept func(*types.Signature) bool,
 	seen map[types.Type]bool,
 ) bool {
-	if typ == nil {
-		return false
-	}
-
 	typ = types.Unalias(typ)
 	if seen[typ] {
 		return false
@@ -676,8 +618,6 @@ func hasAcceptedSignature(
 	}
 
 	switch typ := typ.(type) {
-	case *types.TypeParam:
-		return hasAcceptedSignature(typ.Constraint(), typeParam, accept, seen)
 	case *types.Named:
 		return hasAcceptedSignature(typ.Underlying(), typeParam, accept, seen)
 	case *types.Interface:

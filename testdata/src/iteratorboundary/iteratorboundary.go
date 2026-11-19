@@ -81,6 +81,10 @@ func rangeDependencyIterator() {
 func declareDependencyConstraint[S iteratorprovider.Sequence[int]]() { // want `iterator-shaped type`
 }
 
+func passDependencySequence[S iteratorprovider.Sequence[int]](sequence S) S { // want `iterator-shaped type` `iterator-shaped type`
+	return sequence
+}
+
 func declareHeterogeneousDependencyConstraint[S iteratorprovider.HeterogeneousSequence]() { // want `iterator-shaped type`
 }
 
@@ -148,3 +152,17 @@ type ApproximateBoolReceiver[B ~bool] struct{}
 func (ApproximateBoolReceiver[B]) consume(sequence func(func(int) B)) {
 	_ = sequence
 }
+
+type PairSequenceHolder[S iteratorprovider.PairSequence[string, int]] struct{} // want `constraint iteratorprovider\.PairSequence\[string, int\] contains an iterator-shaped term`
+
+type AliasConstraintHolder[S iteratorprovider.SequenceConstraintAlias] struct{} // want `contains an iterator-shaped term`
+
+func declareAnyUnionWithMethod[S iteratorprovider.AnyOrSequenceWithMethod]() {
+}
+
+func declareUnsafePointerNarrowed[S iteratorprovider.UnsafePointerOrSequence]() { // want `iterator-shaped type`
+}
+
+// A forward reference to an iterator type parameter is covered by the
+// diagnostic at that parameter's own constraint.
+type ForwardReference[U interface{ ~[]T }, T iteratorprovider.Sequence[int]] struct{} // want `contains an iterator-shaped term`

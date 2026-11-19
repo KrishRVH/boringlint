@@ -24,6 +24,11 @@ type YieldFunc[T any] interface {
 
 type ConstrainedSequence[T ~func(func(int) bool)] struct{} // want `iterator-shaped type`
 
+type ForwardConstrainedSequence[U interface{ ~[]T }, T ~func(func(int) bool)] struct{} // want `iterator-shaped type`
+
+// boringlint has no per-site suppression; //nolint is a golangci-lint convention.
+type Suppressed func(func(int) bool) //nolint:noiterator // want `iterator-shaped type`
+
 type Holder struct {
 	Values Sequence // want `iterator-shaped type`
 }
